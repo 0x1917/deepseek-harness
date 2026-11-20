@@ -23,8 +23,8 @@ on:
   schedule:
     - cron: "0 5 * * 1"
   # Manual run. `force_publish=true` marks the build publishable even though
-  # nothing changed (a dispatch has no before-sha to diff); that is how a
-  # rebuild on a fresh base image ships as `-r<n>`.
+  # nothing changed (a dispatch is never diffed); that is how a rebuild on a
+  # fresh base image ships as `-r<n>`.
   workflow_dispatch:
     inputs:
       force_publish:
@@ -54,16 +54,22 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0   # the scope check diffs github.event.before against HEAD
+          fetch-depth: 0   # the scope check diffs the last published tag against HEAD
 
       # Anything in the repo counts as a build input except paths that never
       # reach the image, so a new file defaults to publishing rather than
       # silently skipping.
+      #
+      # The baseline is the highest source tag, i.e. what last shipped, not
+      # github.event.before: after a force-push that sha is orphaned and absent
+      # from the clone, and a push that only amends a README commit must not
+      # republish. A failed publish leaves no tag, so the next push retries it.
+      # Tags are ordered by semver (scripts/tags.mjs): sort -V misorders
+      # prereleases.
       - name: Determine if image was updated
         id: scope
         if: github.event_name != 'pull_request'
         env:
-          BEFORE: ${{ github.event.before }}
           EVENT: ${{ github.event_name }}
           FORCE: ${{ inputs.force_publish }}
         run: |
@@ -88,11 +94,12 @@ jobs:
             echo "publish=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]                            \
-             || ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null                                 \
-             || ! git diff --quiet "$BEFORE" "$GITHUB_SHA" -- .                                    \
+          LAST=$(git tag -l 'v*' | node scripts/tags.mjs max)
+          if [ -z "$LAST" ]                                                                        \
+             || ! git diff --quiet "$LAST" "$GITHUB_SHA" -- .                                      \
                   ':(exclude)scripts' ':(exclude).github' ':(exclude)*.md' ':(exclude)renovate.json5' \
                   ':(exclude)LICENSE'; then
+            echo "build inputs changed since ${LAST:-no release tag yet}, packaging for publish"
             echo "publish=true" >> "$GITHUB_OUTPUT"
           else
             echo "no build input changed, so build and smoke only"

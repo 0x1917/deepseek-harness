@@ -15,5 +15,5 @@ contact_links:
     url: https://deepseek-harness.github.io/deepseek-harness/
     about: Configuration, providers, plugins and the Web UI guide, maintained by the upstream project.
   - name: Image tags on Docker Hub
-    url: https://hub.docker.com/r/0x1917/dsh/tags
+    url: https://hub.docker.com/r/0x1917/deepseek-harness/tags
     about: Every published version, and what :latest points at.

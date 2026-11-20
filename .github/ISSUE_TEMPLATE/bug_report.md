@@ -11,7 +11,7 @@ assignees: ""
 
 **How the container runs**
 
-- Image and tag: <!-- 0x1917/dsh:<version> or 0x1917/dsh:latest -->
+- Image and tag: <!-- 0x1917/deepseek-harness:<version> or 0x1917/deepseek-harness:latest -->
 - Deployed with: <!-- Unraid template, docker run, or docker compose -->
 - Unraid version, or host distribution, kernel and Docker version:
 - CPU architecture: <!-- this image is built for x86_64 only -->

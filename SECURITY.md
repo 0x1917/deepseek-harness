@@ -35,7 +35,7 @@ new tag, and older tags are never patched. Upstream is a developer preview with
 compatibility-breaking changes between releases, so there is no LTS and no backport.
 
 ```sh
-docker pull 0x1917/dsh:latest
+docker pull 0x1917/deepseek-harness:latest
 ```
 
 ## What the image does and does not protect

@@ -6,10 +6,10 @@
 # and only then pushes to Docker Hub, tags the source, and cuts the GitHub
 # release. Nothing here can build.
 #
-# The Docker Hub repository is PRIVATE while upstream is in prerelease. Pushing
-# to a missing repository creates it with the account's default visibility
-# (usually public), so the push is gated on the repository existing and
-# reporting is_private=true; a missing one is created private first.
+# Docker Hub visibility is set by VISIBILITY below. Pushing to a missing
+# repository creates it with the account's default visibility (usually public),
+# so the push is gated on the repository existing with the visibility asked for;
+# a missing one is created with it first.
 #
 # Tags: the first publish of an upstream version gets the bare version
 # (v0.2.2-rc.5 in git, 0.2.2-rc.5 on the registry); a rebuild of it gets
@@ -47,10 +47,11 @@ concurrency:
 
 env:
   NAMESPACE: 0x1917
-  REPOSITORY: dsh
-  IMAGE: 0x1917/dsh
+  REPOSITORY: deepseek-harness
+  IMAGE: 0x1917/deepseek-harness
   ARTIFACT: deepseek-harness-image
   UPSTREAM: deepseek-ai/deepseek-harness
+  VISIBILITY: private   # private or public
 
 jobs:
   publish:
@@ -201,14 +202,19 @@ jobs:
           username: ${{ env.NAMESPACE }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # The visibility gate. Nothing is pushed unless Docker Hub says the
-      # repository is private.
-      - name: Ensure the Docker Hub repository is private
+      # The visibility gate. Nothing is pushed unless Docker Hub reports the
+      # repository with the visibility VISIBILITY asks for.
+      - name: Ensure the Docker Hub repository visibility
         if: steps.meta.outputs.publish == 'true'
         env:
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
           set -euo pipefail
+          case "$VISIBILITY" in
+            private) WANT=true ;;
+            public)  WANT=false ;;
+            *) echo "VISIBILITY must be private or public, not '$VISIBILITY'" >&2; exit 1 ;;
+          esac
           HUB=https://hub.docker.com/v2
           JWT=$(jq -n --arg u "$NAMESPACE" --arg s "$DOCKERHUB_TOKEN" '{identifier:$u, secret:$s}' \
                 | curl -fsS -H 'Content-Type: application/json' -d @- "$HUB/auth/token" | jq -r .access_token)
@@ -217,17 +223,17 @@ jobs:
                      "$HUB/namespaces/$NAMESPACE/repositories/$REPOSITORY"; }
           CODE=$(repo)
           if [ "$CODE" = 404 ]; then
-            echo "$IMAGE does not exist yet, creating it private"
-            jq -n --arg n "$REPOSITORY" '{name:$n, is_private:true, description:"DeepSeek Harness (dsh) web UI for Unraid"}' \
+            echo "$IMAGE does not exist yet, creating it $VISIBILITY"
+            jq -n --arg n "$REPOSITORY" --argjson p "$WANT" '{name:$n, is_private:$p}' \
               | curl -fsS -o /dev/null -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
                   -d @- "$HUB/namespaces/$NAMESPACE/repositories" \
-              || { echo "::error::could not create $IMAGE; create it as a PRIVATE repository on Docker Hub and re-run" >&2; exit 1; }
+              || { echo "::error::could not create $IMAGE; create it ($VISIBILITY) on Docker Hub and re-run" >&2; exit 1; }
             CODE=$(repo)
           fi
           [ "$CODE" = 200 ] || { echo "Docker Hub answered $CODE for $IMAGE" >&2; exit 1; }
-          [ "$(jq -r .is_private "$RUNNER_TEMP/repo.json")" = true ] \
-            || { echo "::error::$IMAGE is PUBLIC on Docker Hub; refusing to push while upstream is in prerelease" >&2; exit 1; }
-          echo "$IMAGE is private"
+          [ "$(jq -r .is_private "$RUNNER_TEMP/repo.json")" = "$WANT" ] \
+            || { echo "::error::$IMAGE is not $VISIBILITY on Docker Hub; refusing to push" >&2; exit 1; }
+          echo "$IMAGE is $VISIBILITY"
 
       - name: Tag and push the image
         if: steps.meta.outputs.publish == 'true'
@@ -314,7 +320,7 @@ jobs:
           BODY="$RUNNER_TEMP/release.md"
           # shellcheck disable=SC2016
           {
-            printf 'Container image for DeepSeek Harness %s, built from the npm release of upstream tag [%s](https://github.com/%s/releases/tag/%s). Published to Docker Hub as `%s:%s` (private).\n\n' \
+            printf 'Container image for DeepSeek Harness %s, built from the npm release of upstream tag [%s](https://github.com/%s/releases/tag/%s). Published to Docker Hub as `%s:%s`.\n\n' \
               "$VERSION" "$UP_TAG" "$UPSTREAM" "$UP_TAG" "$IMAGE" "${TAG#v}"
             printf '| Digest | Tag commit | Build run |\n| --- | --- | --- |\n'
             printf "| \`%s\` | %s | [%s](%s/%s/actions/runs/%s) |\n\n" \

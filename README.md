@@ -1,10 +1,10 @@
 # DeepSeek Harness (DSH)
 
-[![Version](https://img.shields.io/docker/v/0x1917/dsh)](https://hub.docker.com/r/0x1917/dsh)
+[![Version](https://img.shields.io/docker/v/0x1917/deepseek-harness)](https://hub.docker.com/r/0x1917/deepseek-harness)
 [![Build](https://github.com/0x1917/deepseek-harness/actions/workflows/build.yml/badge.svg)](https://github.com/0x1917/deepseek-harness/actions/workflows/build.yml)
 [![Lint](https://github.com/0x1917/deepseek-harness/actions/workflows/lint.yml/badge.svg)](https://github.com/0x1917/deepseek-harness/actions/workflows/lint.yml)
-[![Pulls](https://img.shields.io/docker/pulls/0x1917/dsh)](https://hub.docker.com/r/0x1917/dsh)
-[![Image size](https://img.shields.io/docker/image-size/0x1917/dsh)](https://hub.docker.com/r/0x1917/dsh)
+[![Pulls](https://img.shields.io/docker/pulls/0x1917/deepseek-harness)](https://hub.docker.com/r/0x1917/deepseek-harness)
+[![Image size](https://img.shields.io/docker/image-size/0x1917/deepseek-harness)](https://hub.docker.com/r/0x1917/deepseek-harness)
 [![Platform](https://img.shields.io/badge/platform-linux%2Famd64-blue?logo=linux&logoColor=white)](#command-sandbox)
 [![License](https://img.shields.io/github/license/0x1917/deepseek-harness)](https://github.com/0x1917/deepseek-harness/blob/master/LICENSE)
 
@@ -19,7 +19,7 @@ docker build -t dsh .
 
 ## Run
 
-Prebuilt on Docker Hub: `docker pull 0x1917/dsh:latest`.
+Prebuilt on Docker Hub: `docker pull 0x1917/deepseek-harness:latest`.
 
 ```sh
 docker run -d                        \
@@ -28,7 +28,7 @@ docker run -d                        \
   -p 3080:3080                       \
   -v /mnt/user/appdata/dsh:/data     \
   -v /mnt/user/workspace:/workspace  \
-  0x1917/dsh
+  0x1917/deepseek-harness
 
 docker logs dsh   # prints the login URL
 ```
