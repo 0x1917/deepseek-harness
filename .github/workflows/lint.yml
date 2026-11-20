@@ -1,0 +1,62 @@
+# Static checks that need no image: workflow schema (actionlint, which also
+# lints the shell inside `run:` blocks), the shell scripts (shellcheck), and the
+# tag-ordering tests the publish workflow depends on.
+#
+# One job, one check context (`lint`), independent verdicts: each check runs to
+# completion and the last step reports all of them before failing the job.
+
+name: lint
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: actionlint
+        id: actionlint
+        continue-on-error: true
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12
+
+      - name: shellcheck
+        id: shellcheck
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          shellcheck --version >/dev/null || { echo "shellcheck not on the runner" >&2; exit 1; }
+          shellcheck -x -S warning entrypoint.sh scripts/*.sh
+
+      - name: tag ordering tests
+        id: tags
+        continue-on-error: true
+        run: node --test scripts/
+
+      - name: Verdict
+        if: always()
+        env:
+          ACTIONLINT: ${{ steps.actionlint.outcome }}
+          SHELLCHECK: ${{ steps.shellcheck.outcome }}
+          TAGS: ${{ steps.tags.outcome }}
+        run: |
+          set -uo pipefail
+          echo "actionlint: $ACTIONLINT"
+          echo "shellcheck: $SHELLCHECK"
+          echo "tags:       $TAGS"
+          rc=0
+          [ "$ACTIONLINT" = "success" ] || { echo "::error::actionlint failed"; rc=1; }
+          [ "$SHELLCHECK" = "success" ] || { echo "::error::shellcheck failed"; rc=1; }
+          [ "$TAGS" = "success" ] || { echo "::error::tag ordering tests failed"; rc=1; }
+          exit "$rc"

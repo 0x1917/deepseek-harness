@@ -1,5 +1,7 @@
 FROM node:24-slim
 
+# The npm release this image is built from. Renovate bumps it from upstream's
+# dsh-v* git tags (renovate.json5).
 ARG DSH_VERSION=0.2.2-rc.5
 
 # Tools the agent commonly shells out to. bubblewrap is the command sandbox on kernels

@@ -1,0 +1,180 @@
+# Build and smoke-test the deepseek-harness image.
+#
+# This workflow NEVER writes to the registry. When the change set touches a
+# build input it exports the tested image as a compressed tarball artifact plus
+# a small metadata file, and `publish.yml` picks that up via `workflow_run`.
+# Secrets stay in the publish workflow.
+#
+# Version comes from `ARG DSH_VERSION` in the Dockerfile, which Renovate bumps
+# from upstream's `dsh-v*` git tags (renovate.json5). Upstream publishes the npm
+# package from the same tag, so a bump can land minutes before npm has it: the
+# build waits for the version to appear instead of failing on the race.
+
+name: build
+
+on:
+  # Every push builds, on any branch and any path. What publishes is decided by
+  # the scope step, which requires master AND a diff in the build inputs.
+  push:
+  # Every PR runs the build, no path filter, so the "build" check always reports.
+  pull_request:
+  # Weekly canary: a broken upstream release, base image or apt mirror shows up
+  # as a red run instead of waiting for the next bump. Never publishes.
+  schedule:
+    - cron: "0 5 * * 1"
+  # Manual run. `force_publish=true` marks the build publishable even though
+  # nothing changed (a dispatch has no before-sha to diff); that is how a
+  # rebuild on a fresh base image ships as `-r<n>`.
+  workflow_dispatch:
+    inputs:
+      force_publish:
+        description: "Force publish image"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: write      # upload the image artifact for the publish workflow
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  ARTIFACT: deepseek-harness-image
+  RETENTION: 3
+
+jobs:
+  build:
+    # The check context equals this name. A ruleset that requires "build"
+    # silently disarms if it changes.
+    name: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # the scope check diffs github.event.before against HEAD
+
+      # Anything in the repo counts as a build input except paths that never
+      # reach the image, so a new file defaults to publishing rather than
+      # silently skipping.
+      - name: Determine if image was updated
+        id: scope
+        if: github.event_name != 'pull_request'
+        env:
+          BEFORE: ${{ github.event.before }}
+          EVENT: ${{ github.event_name }}
+          FORCE: ${{ inputs.force_publish }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            if [ "$FORCE" = "true" ]; then
+              echo "forced by the dispatch input, packaging for publish"
+              echo "publish=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "dispatch without force_publish, so build and smoke only"
+              echo "publish=false" >> "$GITHUB_OUTPUT"
+            fi
+            exit 0
+          fi
+          if [ "$EVENT" = "schedule" ]; then
+            echo "scheduled run, so build and smoke only"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$GITHUB_REF" != "refs/heads/master" ]; then
+            echo "not master, so build and smoke only"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]                            \
+             || ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null                                 \
+             || ! git diff --quiet "$BEFORE" "$GITHUB_SHA" -- .                                    \
+                  ':(exclude)scripts' ':(exclude).github' ':(exclude)*.md' ':(exclude)renovate.json5' \
+                  ':(exclude)LICENSE'; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "no build input changed, so build and smoke only"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve version from the Dockerfile
+        id: meta
+        run: |
+          set -euo pipefail
+          V=$(sed -n 's/^ARG DSH_VERSION=//p' Dockerfile | head -1)
+          case "$V" in
+            ""|*[!0-9A-Za-z.-]*) echo "unreadable ARG DSH_VERSION: '$V'" >&2; exit 1 ;;
+          esac
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+      # The tag-to-npm race: wait up to ~15 minutes for the pinned version.
+      - name: Wait for the version on npm
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            if [ "$(npm view "@deepseek-ai/dsh@$VERSION" version 2>/dev/null)" = "$VERSION" ]; then
+              echo "@deepseek-ai/dsh@$VERSION is on npm"
+              exit 0
+            fi
+            echo "attempt $i: @deepseek-ai/dsh@$VERSION not on npm yet"
+            sleep 30
+          done
+          echo "::error::@deepseek-ai/dsh@$VERSION never appeared on npm; re-run once upstream publishes it"
+          exit 1
+
+      - uses: docker/setup-buildx-action@v4
+
+      # The registry is private, so there is no anonymous registry cache to read:
+      # the Actions cache carries layers between runs.
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: deepseek-harness:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Unraid has no Landlock, so the image's sandbox there is bubblewrap. The
+      # runner's kernel blocks the user namespaces bwrap needs (an Ubuntu 24.04
+      # AppArmor default Unraid doesn't have); lift it so the smoke test
+      # exercises the Unraid path.
+      - name: Allow unprivileged user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Run smoke test
+        run: bash scripts/smoke-test.sh deepseek-harness:test
+
+      - name: Write the bundle manifest
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          PUBLISH: ${{ steps.scope.outputs.publish }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bundle"
+          ID=$(docker image inspect --format '{{.Id}}' deepseek-harness:test)
+          jq -n --arg v "$VERSION" --arg id "$ID" --arg sha "$GITHUB_SHA" --arg run "$GITHUB_RUN_ID" \
+                --argjson pub "${PUBLISH:-false}"                                                  \
+                '{version:$v, image_id:$id, commit:$sha, build_run:$run, publish:$pub}'            \
+                > "$RUNNER_TEMP/bundle/meta.json"
+          cat "$RUNNER_TEMP/bundle/meta.json"
+
+      # Hand the EXACT image that passed the gate to the publish workflow. The
+      # image ID in meta.json lets the publish side prove it loaded these bytes.
+      - name: Package the tested image
+        if: steps.scope.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          docker save deepseek-harness:test | zstd -T0 -3 -q -o "$RUNNER_TEMP/bundle/image.tar.zst"
+          ls -lh "$RUNNER_TEMP/bundle"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.ARTIFACT }}
+          path: ${{ runner.temp }}/bundle
+          retention-days: ${{ env.RETENTION }}
+          compression-level: 0   # the tarball is already zstd

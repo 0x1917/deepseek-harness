@@ -1,0 +1,344 @@
+# Publish the image that `build.yml` built and smoke-tested.
+#
+# Chained with `workflow_run`: it fires when the build workflow completes,
+# downloads that exact run's artifact, proves the loaded image is the tested one
+# (image ID from meta.json, plus the smoke gate run again on the loaded bytes),
+# and only then pushes to Docker Hub, tags the source, and cuts the GitHub
+# release. Nothing here can build.
+#
+# The Docker Hub repository is PRIVATE while upstream is in prerelease. Pushing
+# to a missing repository creates it with the account's default visibility
+# (usually public), so the push is gated on the repository existing and
+# reporting is_private=true; a missing one is created private first.
+#
+# Tags: the first publish of an upstream version gets the bare version
+# (v0.2.2-rc.5 in git, 0.2.2-rc.5 on the registry); a rebuild of it gets
+# -r<n>. `latest` moves only when this run carries the highest tag of the whole
+# series, ordered by semver (scripts/tags.mjs).
+#
+# Upstream ships no GitHub "latest" release, only prereleases on `dsh-v*` tags,
+# so the release body quotes the notes of the `dsh-v<version>` tag, if any.
+#
+# Secrets (Repo Settings > Secrets and Variables > Actions):
+#   DOCKERHUB_TOKEN     Docker Hub access token with Read & Write scope
+
+name: publish
+
+on:
+  workflow_run:
+    workflows: [build]
+    types: [completed]
+  # Manual re-publish of a specific build run: pass its run id.
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: "The build run ID to publish: Open Actions > Build > Click on the run > Extract the ID from the URL."
+        required: true
+        type: string
+
+permissions:
+  contents: write   # push the source tag and create the release
+  actions: read     # download the artifact from the triggering run
+
+# Serialised: `latest` must never be raced, and the -r<n> series assumes one writer.
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+env:
+  NAMESPACE: 0x1917
+  REPOSITORY: dsh
+  IMAGE: 0x1917/dsh
+  ARTIFACT: deepseek-harness-image
+  UPSTREAM: deepseek-ai/deepseek-harness
+
+jobs:
+  publish:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'master' &&
+       (github.event.workflow_run.event == 'push' ||
+        github.event.workflow_run.event == 'workflow_dispatch'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      RUN_ID: ${{ github.event.workflow_run.id || inputs.build_run_id }}
+    steps:
+      # The commit to tag is the BUILD RUN's head. Validate the run itself: a
+      # dispatch can name any run id, including a fork PR's build, whose code
+      # would then run here with a write token. Only master pushes/dispatches pass.
+      - name: Resolve and validate the target commit
+        id: target
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WR_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          case "$RUN_ID" in
+            *[!0-9]*|"") echo "not a run id: $RUN_ID" >&2; exit 1 ;;
+          esac
+          RUN=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID")
+          BRANCH=$(printf '%s' "$RUN" | jq -r .head_branch)
+          EVENT=$(printf '%s' "$RUN" | jq -r .event)
+          SHA=$(printf '%s' "$RUN" | jq -r .head_sha)
+          case "$EVENT" in
+            push|workflow_dispatch) ;;
+            *) echo "build run $RUN_ID came from '$EVENT', refusing" >&2; exit 1 ;;
+          esac
+          [ "$BRANCH" = "master" ] || { echo "build run $RUN_ID is on '$BRANCH', not master" >&2; exit 1; }
+          [ -z "$WR_SHA" ] || [ "$WR_SHA" = "$SHA" ] || { echo "payload sha disagrees with the run" >&2; exit 1; }
+          case "$SHA" in
+            *[!0-9a-f]*|"") echo "not a commit sha: $SHA" >&2; exit 1 ;;
+          esac
+          [ "${#SHA}" -eq 40 ] || { echo "not a commit sha: $SHA" >&2; exit 1; }
+          echo "publishing build run $RUN_ID ($SHA) from $EVENT on $BRANCH"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.ARTIFACT }}
+          # Outside the checkout: actions/checkout cleans the working tree.
+          path: ${{ runner.temp }}/bundle
+          run-id: ${{ env.RUN_ID }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Read the bundle manifest
+        id: meta
+        run: |
+          set -euo pipefail
+          BUNDLE="$RUNNER_TEMP/bundle"
+          test -s "$BUNDLE/meta.json" || { echo "no meta.json in the artifact" >&2; exit 1; }
+          cat "$BUNDLE/meta.json"
+          {
+            echo "version=$(jq -r .version "$BUNDLE/meta.json")"
+            echo "image_id=$(jq -r .image_id "$BUNDLE/meta.json")"
+            echo "publish=$(jq -r .publish "$BUNDLE/meta.json")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Nothing to publish
+        if: steps.meta.outputs.publish != 'true'
+        run: echo "that build was not marked for publishing, so this run stops here"
+
+      - uses: actions/checkout@v7
+        if: steps.meta.outputs.publish == 'true'
+        with:
+          ref: ${{ steps.target.outputs.sha }}
+          fetch-depth: 0   # the tag step reads the remote's tags
+          persist-credentials: false
+
+      - name: Load the tested image
+        if: steps.meta.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          BUNDLE="$RUNNER_TEMP/bundle"
+          test -s "$BUNDLE/image.tar.zst" || { echo "artifact has no image tarball" >&2; exit 1; }
+          zstd -dc "$BUNDLE/image.tar.zst" | docker load
+          GOT=$(docker image inspect --format '{{.Id}}' deepseek-harness:test)
+          WANT="${{ steps.meta.outputs.image_id }}"
+          echo "loaded: $GOT"
+          echo "tested: $WANT"
+          [ "$GOT" = "$WANT" ] || { echo "the loaded image is not the image that was tested" >&2; exit 1; }
+
+      # Same runner kernel restriction as in build.yml, for the bubblewrap check.
+      - name: Allow unprivileged user namespaces
+        if: steps.meta.outputs.publish == 'true'
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      # The bytes travelled through an artifact store, so the gate runs again on
+      # what actually arrived rather than trusting the build run's log.
+      - name: Run the smoke test on the loaded image
+        if: steps.meta.outputs.publish == 'true'
+        run: bash scripts/smoke-test.sh deepseek-harness:test
+
+      # Computed from read-only git state BEFORE anything is pushed.
+      - name: Resolve the publish tag
+        id: pubtag
+        if: steps.meta.outputs.publish == 'true'
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          BASE="v${VERSION}"
+          TAG=$(git tag --points-at HEAD | node scripts/tags.mjs version "$VERSION")
+          # A tag on this commit is only this run's when its note names this
+          # build run; a new build of a published commit is a rebuild.
+          if [ -n "$TAG" ] && ! git tag -l --format='%(contents)' "$TAG" | grep -Fq "build run $RUN_ID)"; then
+            echo "$TAG on this commit came from another build run, numbering a rebuild"
+            TAG=""
+          fi
+          if [ -n "$TAG" ]; then
+            NOTE="Source state published as $IMAGE:${TAG#v} (build run $RUN_ID)"
+          elif git ls-remote --exit-code --tags origin "refs/tags/$BASE" >/dev/null 2>&1; then
+            N=$(git ls-remote --tags origin | awk -v p="refs/tags/${BASE}-r" \
+                  'index($2, p) == 1 { n = substr($2, length(p) + 1); if (n ~ /^[0-9]+$/) print n }' \
+                  | sort -n | tail -1)
+            N=${N:-0}
+            TAG="${BASE}-r$((N + 1))"
+            NOTE="Rebuild #$((N + 1)) of $IMAGE:$VERSION (release tag already exists, build run $RUN_ID)"
+          else
+            TAG="$BASE"
+            NOTE="Source state published as $IMAGE:$VERSION (build run $RUN_ID)"
+          fi
+          # The new tag is not on the remote yet, so it joins the candidates.
+          HIGHEST_ALL=$({ git ls-remote --tags origin | awk '{sub(/^refs\/tags\//,"",$2); print $2}'; echo "$TAG"; } \
+            | node scripts/tags.mjs max)
+          if [ "$TAG" = "$HIGHEST_ALL" ]; then PUSH_LATEST=true; else PUSH_LATEST=false; fi
+          {
+            echo "tag=$TAG"
+            echo "registry_tag=${TAG#v}"
+            echo "note=$NOTE"
+            echo "push_latest=$PUSH_LATEST"
+          } >> "$GITHUB_OUTPUT"
+          echo "publish tag: $TAG (registry tag: ${TAG#v}, push_latest=$PUSH_LATEST)"
+
+      - name: Log in to Docker Hub
+        if: steps.meta.outputs.publish == 'true'
+        uses: docker/login-action@v4
+        with:
+          username: ${{ env.NAMESPACE }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # The visibility gate. Nothing is pushed unless Docker Hub says the
+      # repository is private.
+      - name: Ensure the Docker Hub repository is private
+        if: steps.meta.outputs.publish == 'true'
+        env:
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          HUB=https://hub.docker.com/v2
+          JWT=$(jq -n --arg u "$NAMESPACE" --arg s "$DOCKERHUB_TOKEN" '{identifier:$u, secret:$s}' \
+                | curl -fsS -H 'Content-Type: application/json' -d @- "$HUB/auth/token" | jq -r .access_token)
+          [ -n "$JWT" ] && [ "$JWT" != null ] || { echo "Docker Hub API login failed" >&2; exit 1; }
+          repo() { curl -sS -o "$RUNNER_TEMP/repo.json" -w '%{http_code}' -H "Authorization: Bearer $JWT" \
+                     "$HUB/namespaces/$NAMESPACE/repositories/$REPOSITORY"; }
+          CODE=$(repo)
+          if [ "$CODE" = 404 ]; then
+            echo "$IMAGE does not exist yet, creating it private"
+            jq -n --arg n "$REPOSITORY" '{name:$n, is_private:true, description:"DeepSeek Harness (dsh) web UI for Unraid"}' \
+              | curl -fsS -o /dev/null -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
+                  -d @- "$HUB/namespaces/$NAMESPACE/repositories" \
+              || { echo "::error::could not create $IMAGE; create it as a PRIVATE repository on Docker Hub and re-run" >&2; exit 1; }
+            CODE=$(repo)
+          fi
+          [ "$CODE" = 200 ] || { echo "Docker Hub answered $CODE for $IMAGE" >&2; exit 1; }
+          [ "$(jq -r .is_private "$RUNNER_TEMP/repo.json")" = true ] \
+            || { echo "::error::$IMAGE is PUBLIC on Docker Hub; refusing to push while upstream is in prerelease" >&2; exit 1; }
+          echo "$IMAGE is private"
+
+      - name: Tag and push the image
+        if: steps.meta.outputs.publish == 'true'
+        env:
+          REGISTRY_TAG: ${{ steps.pubtag.outputs.registry_tag }}
+          PUSH_LATEST: ${{ steps.pubtag.outputs.push_latest }}
+        run: |
+          set -euo pipefail
+          docker tag deepseek-harness:test "$IMAGE:$REGISTRY_TAG"
+          docker push "$IMAGE:$REGISTRY_TAG"
+          if [ "$PUSH_LATEST" = "true" ]; then
+            docker tag deepseek-harness:test "$IMAGE:latest"
+            docker push "$IMAGE:latest"
+          else
+            echo "not the highest tag of the series, so latest is left alone"
+          fi
+
+      - name: Verify the pushed digest
+        id: digests
+        if: steps.meta.outputs.publish == 'true'
+        env:
+          REGISTRY_TAG: ${{ steps.pubtag.outputs.registry_tag }}
+          PUSH_LATEST: ${{ steps.pubtag.outputs.push_latest }}
+        run: |
+          set -euo pipefail
+          v=$(docker buildx imagetools inspect "$IMAGE:$REGISTRY_TAG" --format '{{.Manifest.Digest}}')
+          echo "version: $v"
+          if [ "$PUSH_LATEST" = "true" ]; then
+            l=$(docker buildx imagetools inspect "$IMAGE:latest" --format '{{.Manifest.Digest}}')
+            echo "latest:  $l"
+            [ "$v" = "$l" ]
+          fi
+          echo "digest=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Create the source tag
+        id: tag
+        if: steps.meta.outputs.publish == 'true'
+        env:
+          TAG: ${{ steps.pubtag.outputs.tag }}
+          NOTE: ${{ steps.pubtag.outputs.note }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Checkout kept no credentials; the push authenticates here, after the
+          # image is already published.
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if git tag --points-at HEAD | grep -Fxq "$TAG"; then
+            echo "this commit already carries $TAG, nothing to tag"
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "$NOTE"
+          git push origin "refs/tags/$TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      # Last on purpose: everything it states has already happened.
+      - name: Create or update the GitHub release
+        if: success() && steps.meta.outputs.publish == 'true'
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          DIGEST: ${{ steps.digests.outputs.digest }}
+          SHA: ${{ steps.target.outputs.sha }}
+          BUILD_RUN: ${{ env.RUN_ID }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # The single-quoted backticks in this step are markdown code spans, not
+          # command substitutions, hence the SC2016 disables.
+          set -euo pipefail
+          [ -n "${TAG:-}" ] || { echo "no source tag resolved for v$VERSION, refusing to guess" >&2; exit 1; }
+          UP_TAG="dsh-v$VERSION"
+          NOTES="$RUNNER_TEMP/upstream-notes.md"
+
+          # Upstream's notes credit contributors with @handles; quoting them raw
+          # would mention those people from this repo, so they become code spans.
+          # shellcheck disable=SC2016
+          gh api "repos/$UPSTREAM/releases/tags/$UP_TAG" --jq .body 2>/dev/null \
+            | sed -E 's/(^|[^`A-Za-z0-9_])@([A-Za-z0-9][A-Za-z0-9-]*)/\1`@\2`/g' > "$NOTES" || : > "$NOTES"
+          # shellcheck disable=SC2016
+          [ -s "$NOTES" ] || printf '_Upstream published no notes for `%s`._\n' "$UP_TAG" > "$NOTES"
+
+          BODY="$RUNNER_TEMP/release.md"
+          # shellcheck disable=SC2016
+          {
+            printf 'Container image for DeepSeek Harness %s, built from the npm release of upstream tag [%s](https://github.com/%s/releases/tag/%s). Published to Docker Hub as `%s:%s` (private).\n\n' \
+              "$VERSION" "$UP_TAG" "$UPSTREAM" "$UP_TAG" "$IMAGE" "${TAG#v}"
+            printf '| Digest | Tag commit | Build run |\n| --- | --- | --- |\n'
+            printf "| \`%s\` | %s | [%s](%s/%s/actions/runs/%s) |\n\n" \
+              "${DIGEST:-unknown}" "$SHA" "$BUILD_RUN" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$BUILD_RUN"
+            printf 'The notes below are from upstream %s, quoted as published.\n\n---\n\n' "$UP_TAG"
+            cat "$NOTES"
+          } > "$BODY"
+
+          # Upstream is prerelease-only, so ours is too, and it is never marked latest.
+          FLAGS=(--latest)
+          case "$VERSION" in *-*) FLAGS=(--prerelease --latest=false) ;; esac
+
+          # One release per upstream version, pointing at its HIGHEST source tag.
+          HIGHEST=$(git ls-remote --tags origin | awk '{sub(/^refs\/tags\//,"",$2); print $2}' \
+            | node scripts/tags.mjs version "$VERSION")
+          [ -n "$HIGHEST" ] || HIGHEST="$TAG"
+          if [ "$TAG" != "$HIGHEST" ]; then
+            echo "re-published $TAG, older than $HIGHEST: the release stays as it is"
+            exit 0
+          fi
+          EXISTING=$(gh release list --limit 200 --json tagName --jq '.[].tagName' \
+            | node scripts/tags.mjs version "$VERSION")
+          if [ -n "$EXISTING" ]; then
+            gh release edit "$EXISTING" --tag "$HIGHEST" --verify-tag --title "v$VERSION" --notes-file "$BODY" "${FLAGS[@]}"
+            echo "release retargeted: $EXISTING -> $HIGHEST"
+          else
+            gh release create "$HIGHEST" --title "v$VERSION" --notes-file "$BODY" --verify-tag "${FLAGS[@]}"
+            echo "created the release on $HIGHEST"
+          fi

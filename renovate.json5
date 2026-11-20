@@ -1,0 +1,59 @@
+// Renovate: the upstream watcher for this image (it replaces opengym's scout.yml
+// and Dependabot).
+//
+// Unlike a GITHUB_TOKEN-opened PR, a Renovate app PR triggers workflows, so the
+// `build` (with its smoke test) and `lint` checks run on every bump before it can
+// be merged. Merging a bump to master then builds and publishes through
+// build.yml -> publish.yml.
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: ['config:recommended'],
+  labels: ['dependencies'],
+  customManagers: [
+    {
+      // Upstream cuts no GitHub "latest" release (every release is a
+      // prerelease), so the source of truth is its `dsh-v<version>` git tags.
+      // The Dockerfile installs the npm package of the same version; build.yml
+      // waits for npm to catch up with a fresh tag.
+      customType: 'regex',
+      description: 'DeepSeek Harness release pinned by ARG DSH_VERSION',
+      managerFilePatterns: ['/(^|/)Dockerfile$/'],
+      matchStrings: ['ARG DSH_VERSION=(?<currentValue>\\S+)'],
+      depNameTemplate: 'deepseek-ai/deepseek-harness',
+      datasourceTemplate: 'github-tags',
+      extractVersionTemplate: '^dsh-v(?<version>.+)$',
+      versioningTemplate: 'semver',
+    },
+  ],
+  packageRules: [
+    {
+      matchDepNames: ['deepseek-ai/deepseek-harness'],
+      // Every upstream version is a prerelease: without this, Renovate would
+      // never propose one.
+      ignoreUnstable: false,
+      // rc builds are what upstream's npm `latest` channel carries; alphas are
+      // not, so they are never proposed.
+      allowedVersions: '!/-alpha\\./',
+      commitMessageTopic: 'DeepSeek Harness',
+      labels: ['dependencies', 'upstream'],
+    },
+    {
+      // Pin node:24-slim by digest so base image fixes (Debian security
+      // updates, Node patch releases) arrive as PRs. Merging one republishes the
+      // same dsh version as a -r<n> rebuild. Batched weekly to limit churn.
+      matchDatasources: ['docker'],
+      pinDigests: true,
+    },
+    {
+      matchDatasources: ['docker'],
+      matchUpdateTypes: ['digest', 'pinDigest'],
+      schedule: ['before 6am on monday'],
+    },
+    {
+      // Actions pin by major tag; minor and patch land as one PR, majors stay separate.
+      matchManagers: ['github-actions'],
+      matchUpdateTypes: ['minor', 'patch', 'digest'],
+      groupName: 'github-actions',
+    },
+  ],
+}
