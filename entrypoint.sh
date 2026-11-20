@@ -22,7 +22,40 @@ for h in $(echo "${DSH_TRUSTED_HOSTS:-localhost}" | tr ',' ' '); do
   set -- "$@" --trusted-host "$h"
 done
 
-# The printed login URL uses this root; set it to the address browsers actually use.
-set -- "$@" --public-url "${DSH_PUBLIC_URL:-http://localhost:$DSH_PORT/}"
+# Comma-separated roots browsers use, e.g. "http://10.10.10.100:3080/,https://dsh.example.com/".
+# dsh advertises only one (the first) and prints a login link for it alone.
+urls=$(echo "${DSH_PUBLIC_URL:-http://localhost:$DSH_PORT/}" | tr ',' ' ')
+first=${urls%% *}
+others=${urls#"$first"}
+set -- "$@" --public-url "$first"
 
-exec dsh web "$@"
+if [ -z "$(echo "$others" | tr -d ' ')" ]; then
+  exec dsh web "$@"
+fi
+
+# The launch token works on every trusted host, but the session cookie it is exchanged for
+# is per host, so each address needs its own link: repeat dsh's for every other root.
+# dsh's output goes through a FIFO to a reader rather than a pipe, so dsh is still exec'd: it
+# stays tini's direct child, gets stop signals itself, and its exit status is the container's.
+# The reader is a shell loop, not awk: Debian's mawk block-buffers input from a FIFO.
+fifo=/tmp/dsh-output
+rm -f "$fifo" && mkfifo "$fifo"
+(
+  seen=
+  while IFS= read -r line; do
+    printf '%s\n' "$line"
+    case $line in
+      *[?\&]token=*)
+        [ -n "$seen" ] && continue
+        seen=1
+        token=${line##*token=}
+        token=${token%%[!A-Za-z0-9_-]*}
+        for url in $others; do
+          case $url in *\?*) sep='&' ;; *) sep='?' ;; esac
+          printf 'dsh web: %s%stoken=%s\n' "$url" "$sep" "$token"
+        done
+        ;;
+    esac
+  done
+) < "$fifo" &
+exec dsh web "$@" > "$fifo" 2>&1

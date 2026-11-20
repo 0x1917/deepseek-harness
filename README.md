@@ -35,14 +35,14 @@ docker logs dsh   # prints the login URL
 
 ## Environment
 
-| Variable            | Default                  | Meaning                                                                                 |
-| ------------------- | ------------------------ | --------------------------------------------------------------------------------------- |
-| `DSH_TRUSTED_HOSTS` | `localhost`              | Comma-separated host names that browsers use. Others get 403.                           |
-| `DSH_PUBLIC_URL`    | `http://localhost:3080/` | The root of the printed login URL. Display only.                                        |
-| `DSH_BIND`          | container IP             | The listen address.                                                                     |
-| `PUID` / `PGID`     | `99` / `100`             | The user dsh runs as. `/data` is re-owned to it on start; `/workspace` only when empty. |
-| `UMASK`             | `022`                    | Mask for the files dsh creates.                                                         |
-| `DEEPSEEK_API_KEY`  | unset                    | Optional; the UI can store the key in `/data` instead.                                  |
+| Variable            | Default                  | Meaning                                                                                                             |
+| ------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `DSH_TRUSTED_HOSTS` | `localhost`              | Comma-separated host names that browsers use. Others get 403.                                                       |
+| `DSH_PUBLIC_URL`    | `http://localhost:3080/` | Comma-separated roots browsers use; a login link is printed for each. The first is advertised by dsh. Display only. |
+| `DSH_BIND`          | container IP             | The listen address.                                                                                                 |
+| `PUID` / `PGID`     | `99` / `100`             | The user dsh runs as. `/data` is re-owned to it on start; `/workspace` only when empty.                             |
+| `UMASK`             | `022`                    | Mask for the files dsh creates.                                                                                     |
+| `DEEPSEEK_API_KEY`  | unset                    | Optional; the UI can store the key in `/data` instead.                                                              |
 
 ## Command sandbox
 

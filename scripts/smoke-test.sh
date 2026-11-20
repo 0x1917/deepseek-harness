@@ -38,6 +38,7 @@ mkdir -p "$DATA/data" "$DATA/workspace"
 docker run -d --name "$NAME" -p 127.0.0.1::3080                          \
   --security-opt seccomp=unconfined --security-opt systempaths=unconfined \
   -e DSH_TRUSTED_HOSTS="$TRUSTED" "${EXTRA[@]}"                           \
+  -e DSH_PUBLIC_URL="http://127.0.0.1:3080/,http://$TRUSTED:3080/sub/?x=1" \
   -v "$DATA/data:/data" -v "$DATA/workspace:/workspace" "$IMAGE" >/dev/null
 PORT=$(docker port "$NAME" 3080/tcp | head -1 | sed 's/.*://')
 U="http://127.0.0.1:$PORT"
@@ -79,6 +80,10 @@ pass "bubblewrap sandbox works"
 
 token=$(docker logs "$NAME" 2>&1 | grep -o 'token=[A-Za-z0-9_-]*' | tail -1)
 [ -n "$token" ] || die "no login URL in the log"
+log=$(docker logs "$NAME" 2>&1)
+grep -Fxq "dsh web: http://127.0.0.1:3080/?$token" <<< "$log" || die "no login link for the first DSH_PUBLIC_URL root"
+grep -Fxq "dsh web: http://$TRUSTED:3080/sub/?x=1&$token" <<< "$log" || die "no login link for the second DSH_PUBLIC_URL root"
+pass "a login link for each DSH_PUBLIC_URL root, sharing one token"
 [ "$(code "$U/")" = 401 ] || die "the UI answers without a session"
 [ "$(code -c "$JAR" "$U/?$token")" = 303 ] || die "the launch token was not exchanged for a session"
 [ "$(code -b "$JAR" -o "$DATA/index.html" "$U/")" = 200 ] || die "the UI refused a valid session"
@@ -92,5 +97,16 @@ pass "client bundle loads"
 [ "$(code -b "$JAR" -H "Host: evil.invalid:$PORT" "$U/api/")" = 403 ] || die "an untrusted Host was not fenced"
 [ "$(code -b "$JAR" -H "Host: $TRUSTED:$PORT" "$U/api/")" != 403 ] || die "DSH_TRUSTED_HOSTS was not applied"
 pass "host fence: untrusted Host gets 403, DSH_TRUSTED_HOSTS is admitted"
+
+[ "$(code -H "Host: $TRUSTED:$PORT" "$U/?$token")" = 303 ] || die "the token does not log in on a second trusted host"
+pass "the same token logs in on the second trusted host"
+
+# dsh must get the stop signal itself and exit on its own, not be killed at the timeout.
+start=$(date +%s)
+docker stop -t 20 "$NAME" >/dev/null
+took=$(( $(date +%s) - start ))
+rc=$(docker inspect -f '{{.State.ExitCode}}' "$NAME")
+[ "$took" -lt 10 ] && [ "$rc" = 0 ] || die "docker stop took ${took}s with exit code $rc (expected a clean exit 0)"
+pass "docker stop: clean exit 0 in ${took}s"
 
 echo "smoke test passed: $IMAGE"
