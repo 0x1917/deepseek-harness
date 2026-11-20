@@ -149,6 +149,8 @@ jobs:
       # what actually arrived rather than trusting the build run's log.
       - name: Run the smoke test on the loaded image
         if: steps.meta.outputs.publish == 'true'
+        env:
+          SMOKE_DOCKER_ARGS: --security-opt apparmor=unconfined
         run: bash scripts/smoke-test.sh deepseek-harness:test
 
       # Computed from read-only git state BEFORE anything is pushed.

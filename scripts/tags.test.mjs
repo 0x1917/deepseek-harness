@@ -1,4 +1,4 @@
-// node --test scripts/
+// node --test scripts/tags.test.mjs
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { highest, parse } from './tags.mjs'

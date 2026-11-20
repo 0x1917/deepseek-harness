@@ -140,13 +140,16 @@ jobs:
           cache-to: type=gha,mode=max
 
       # Unraid has no Landlock, so the image's sandbox there is bubblewrap. The
-      # runner's kernel blocks the user namespaces bwrap needs (an Ubuntu 24.04
-      # AppArmor default Unraid doesn't have); lift it so the smoke test
-      # exercises the Unraid path.
+      # runner adds two AppArmor restrictions Unraid doesn't have: this sysctl
+      # (unprivileged user namespaces) and Docker's default AppArmor profile
+      # (mounts, lifted by SMOKE_DOCKER_ARGS), so the smoke test exercises the
+      # Unraid path.
       - name: Allow unprivileged user namespaces
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       - name: Run smoke test
+        env:
+          SMOKE_DOCKER_ARGS: --security-opt apparmor=unconfined
         run: bash scripts/smoke-test.sh deepseek-harness:test
 
       - name: Write the bundle manifest

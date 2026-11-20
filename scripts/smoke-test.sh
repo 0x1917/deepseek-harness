@@ -6,13 +6,17 @@
 #   scripts/smoke-test.sh [image]        (default: deepseek-harness:test)
 #
 # The command sandbox check runs bubblewrap, the path Unraid takes (its kernel
-# has no Landlock). On Ubuntu 24.04 runners, unprivileged user namespaces must be
-# allowed first: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+# has no Landlock). Ubuntu 24.04 runners add two AppArmor restrictions Unraid
+# doesn't have, so CI lifts both to test the Unraid path:
+#   sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+#   SMOKE_DOCKER_ARGS="--security-opt apparmor=unconfined"
 #
 # Requires: docker, curl, bash. ~30 s.
 set -euo pipefail
 
 IMAGE=${1:-deepseek-harness:test}
+# Extra `docker run` arguments, word-split on purpose.
+read -r -a EXTRA <<< "${SMOKE_DOCKER_ARGS:-}"
 NAME=dsh-smoke-$$
 DATA=$(mktemp -d)
 JAR="$DATA/cookies"
@@ -33,7 +37,7 @@ code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
 mkdir -p "$DATA/data" "$DATA/workspace"
 docker run -d --name "$NAME" -p 127.0.0.1::3080                          \
   --security-opt seccomp=unconfined --security-opt systempaths=unconfined \
-  -e DSH_TRUSTED_HOSTS="$TRUSTED"                                         \
+  -e DSH_TRUSTED_HOSTS="$TRUSTED" "${EXTRA[@]}"                           \
   -v "$DATA/data:/data" -v "$DATA/workspace:/workspace" "$IMAGE" >/dev/null
 PORT=$(docker port "$NAME" 3080/tcp | head -1 | sed 's/.*://')
 U="http://127.0.0.1:$PORT"

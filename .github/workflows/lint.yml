@@ -42,7 +42,7 @@ jobs:
       - name: tag ordering tests
         id: tags
         continue-on-error: true
-        run: node --test scripts/
+        run: node --test scripts/tags.test.mjs
 
       - name: Verdict
         if: always()
