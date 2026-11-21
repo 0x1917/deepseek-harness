@@ -140,13 +140,18 @@ jobs:
 
       - uses: docker/setup-buildx-action@v4
 
-      # Only feeds the base.digest label: the FROM line itself is what gets built.
-      - name: Resolve base image digest
+      # Feeds the base.name and base.digest labels from the FROM line, so they
+      # follow it when Renovate moves the base image. The FROM line itself is
+      # what gets built.
+      - name: Resolve the base image
         id: digest
         run: |
           set -euo pipefail
           BASE=$(sed -n 's/^FROM \([^ ]*\).*/\1/p' Dockerfile | tail -1)
-          echo "base_digest=$(docker buildx imagetools inspect "$BASE" --format '{{.Manifest.Digest}}')" >> "$GITHUB_OUTPUT"
+          {
+            echo "base_name=${BASE%%@*}"
+            echo "base_digest=$(docker buildx imagetools inspect "$BASE" --format '{{.Manifest.Digest}}')"
+          } >> "$GITHUB_OUTPUT"
 
       # The registry is private, so there is no anonymous registry cache to read:
       # the Actions cache carries layers between runs.
@@ -161,6 +166,7 @@ jobs:
           build-args: |
             VCS_REF=${{ github.sha }}
             BUILD_DATE=${{ steps.meta.outputs.build_date }}
+            BASE_NAME=${{ steps.digest.outputs.base_name }}
             BASE_DIGEST=${{ steps.digest.outputs.base_digest }}
 
       # Unraid has no Landlock, so the image's sandbox there is bubblewrap. The

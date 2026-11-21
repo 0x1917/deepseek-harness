@@ -56,6 +56,7 @@ ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/dsh-entrypoint"]
 # container not created from the template (docker run, compose).
 ARG VCS_REF=dev
 ARG BUILD_DATE=unknown
+ARG BASE_NAME=unknown
 ARG BASE_DIGEST=unknown
 LABEL org.opencontainers.image.title="DeepSeek Harness"                                                              \
       org.opencontainers.image.description="An open-source AI coding agent."                                         \
@@ -68,7 +69,7 @@ LABEL org.opencontainers.image.title="DeepSeek Harness"                         
       org.opencontainers.image.ref.name="${DSH_VERSION}"                                                             \
       org.opencontainers.image.revision="${VCS_REF}"                                                                 \
       org.opencontainers.image.created="${BUILD_DATE}"                                                               \
-      org.opencontainers.image.base.name="node:24-slim"                                                              \
+      org.opencontainers.image.base.name="${BASE_NAME}"                                                              \
       org.opencontainers.image.base.digest="${BASE_DIGEST}"                                                          \
       net.unraid.docker.icon="https://raw.githubusercontent.com/0x1917/unraid-templates/master/assets/dsh/icon.png"  \
       net.unraid.docker.webui="http://[IP]:[PORT:3080]/"
