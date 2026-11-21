@@ -61,7 +61,8 @@ instead (see [Version management](#version-management)).
 
 ## Run
 
-Prebuilt on Docker Hub: `docker pull 0x1917/deepseek-harness:latest`.
+Prebuilt on Docker Hub: `docker pull 0x1917/deepseek-harness:latest`, also mirrored at
+`ghcr.io/0x1917/deepseek-harness`.
 
 ```sh
 docker run -d                                       \
@@ -219,7 +220,9 @@ build run's commit, so the job holding a write token runs only code already on `
 1. Loads the tarball and asserts the image ID matches the one in `meta.json`
 2. Runs `smoke-test.sh` again on the loaded bytes, because they travelled through an artifact store
 3. Pushes `<ver>` on the first publish of a release, `<ver>-r<n>` on a rebuild, plus `latest`
-   when it carries the highest tag of the series, and verifies the pushed digests
+   when it carries the highest tag of the series, and verifies the pushed digests. The same
+   tags are then copied to `ghcr.io/0x1917/deepseek-harness`, best effort: a GHCR outage ends
+   in a warning, not a red run, because Docker Hub and the git tag are already final
 4. Creates the git source tag on the build run's commit (`v<ver>`, or `v<ver>-r<n>`)
 5. Creates the GitHub release, quoting upstream's notes for `dsh-v<ver>` with contributor
    handles defused, marked as a prerelease when the version is one

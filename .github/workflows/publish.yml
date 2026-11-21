@@ -4,7 +4,8 @@
 # downloads that exact run's artifact, proves the loaded image is the tested one
 # (image ID from meta.json, plus the smoke gate run again on the loaded bytes),
 # and only then pushes to Docker Hub, tags the source, and cuts the GitHub
-# release. Nothing here can build.
+# release, then copies the image to ghcr.io (best effort). Nothing here can
+# build.
 #
 # The scripts this workflow runs (the smoke test, scripts/tags.mjs) come from
 # the default branch, never from the build run's commit: this job holds a
@@ -39,6 +40,7 @@ on:
 permissions:
   contents: write   # push the source tag and create the release
   actions: read     # download the artifact from the triggering run
+  packages: write   # best-effort copy to ghcr.io
 
 # Serialised: `latest` must never be raced, and the -r<n> series assumes one writer.
 concurrency:
@@ -49,6 +51,7 @@ env:
   # Quoted: unquoted, YAML reads 0x1917 as the hex number 6423.
   NAMESPACE: "0x1917"
   IMAGE: 0x1917/deepseek-harness
+  GHCR: ghcr.io/0x1917/deepseek-harness
   ARTIFACT: deepseek-harness-image
   UPSTREAM: deepseek-ai/deepseek-harness
 
@@ -142,19 +145,21 @@ jobs:
       # has created its tag, so two pushes in quick succession both compare against
       # the old baseline and the second republishes an unchanged image as -r<n>.
       # Publish runs are serialised, so by now the highest tag is current. A forced
-      # build (a base image rebuild) skips the check.
+      # build (a base image rebuild) and a manual re-publish of a named build run
+      # skip the check: both are explicit requests to push.
       - name: Confirm the image changed since the last release
         id: recheck
         if: steps.meta.outputs.publish == 'true'
         env:
           SHA: ${{ steps.target.outputs.sha }}
           FORCED: ${{ steps.meta.outputs.forced }}
+          EVENT: ${{ github.event_name }}
         run: |
           set -euo pipefail
           LAST=$(git tag -l 'v*' | node scripts/tags.mjs max)
           INPUTS=()
           while IFS= read -r p; do INPUTS+=("$p"); done < <(grep -vE '^[[:space:]]*(#|$)' .github/build-inputs)
-          if [ "$FORCED" = true ] || [ -z "$LAST" ] || ! git diff --quiet "$LAST" "$SHA" -- "${INPUTS[@]}"; then
+          if [ "$FORCED" = true ] || [ "$EVENT" = workflow_dispatch ] || [ -z "$LAST" ] || ! git diff --quiet "$LAST" "$SHA" -- "${INPUTS[@]}"; then
             echo "publish=true" >> "$GITHUB_OUTPUT"
           else
             echo "no build input changed between $LAST and $SHA (another publish got there first), so nothing to publish"
@@ -293,6 +298,78 @@ jobs:
           git push origin "refs/tags/$TAG"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
+      # ---- best-effort mirror to GHCR ----------------------------------
+      # Everything below runs after the Hub push, the digest check and the git
+      # tag, so a failure here cannot corrupt the release record. Each step is
+      # continue-on-error and the last one reports the combined outcome as a
+      # warning annotation instead of a red run.
+      - name: Log in to GHCR
+        id: ghcr_login
+        if: steps.recheck.outputs.publish == 'true'
+        continue-on-error: true
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push the GHCR copy
+        id: ghcr_push
+        if: steps.recheck.outputs.publish == 'true'
+        continue-on-error: true
+        env:
+          REGISTRY_TAG: ${{ steps.pubtag.outputs.registry_tag }}
+          PUSH_LATEST: ${{ steps.pubtag.outputs.push_latest }}
+        run: |
+          set -euo pipefail
+          docker tag deepseek-harness:test "$GHCR:$REGISTRY_TAG"
+          docker push "$GHCR:$REGISTRY_TAG"
+          if [ "$PUSH_LATEST" = "true" ]; then
+            docker tag deepseek-harness:test "$GHCR:latest"
+            docker push "$GHCR:latest"
+          else
+            echo "not the highest tag of the series, so ghcr latest is left alone"
+          fi
+
+      # Both registries store the same manifest bytes, so the digest is the
+      # same content-addressed value on each: compare the GHCR copy against the
+      # Hub tag too. A mismatch means the mirror is not carrying the published
+      # image. The `latest` pair is compared only when this run moved it.
+      - name: Verify the GHCR tags
+        id: ghcr_verify
+        if: steps.recheck.outputs.publish == 'true'
+        continue-on-error: true
+        env:
+          REGISTRY_TAG: ${{ steps.pubtag.outputs.registry_tag }}
+          PUSH_LATEST: ${{ steps.pubtag.outputs.push_latest }}
+        run: |
+          set -euo pipefail
+          v=$(docker buildx imagetools inspect "$GHCR:$REGISTRY_TAG" --format '{{.Manifest.Digest}}')
+          h=$(docker buildx imagetools inspect "$IMAGE:$REGISTRY_TAG" --format '{{.Manifest.Digest}}')
+          echo "ghcr version: $v"
+          echo "hub  version: $h"
+          [ "$v" = "$h" ]
+          if [ "$PUSH_LATEST" = "true" ]; then
+            l=$(docker buildx imagetools inspect "$GHCR:latest" --format '{{.Manifest.Digest}}')
+            echo "ghcr latest:  $l"
+            [ "$v" = "$l" ]
+          else
+            echo "ghcr latest:  not moved by this run"
+          fi
+
+      - name: GHCR outcome
+        if: always() && steps.recheck.outputs.publish == 'true'
+        env:
+          LOGIN: ${{ steps.ghcr_login.outcome }}
+          PUSH: ${{ steps.ghcr_push.outcome }}
+          VERIFY: ${{ steps.ghcr_verify.outcome }}
+        run: |
+          set -uo pipefail
+          echo "ghcr login: $LOGIN, push: $PUSH, verify: $VERIFY"
+          if [ "$LOGIN" != "success" ] || [ "$PUSH" != "success" ] || [ "$VERIFY" != "success" ]; then
+            echo "::warning::GHCR mirror incomplete (login=$LOGIN push=$PUSH verify=$VERIFY); Docker Hub published, treat ${GHCR:-ghcr.io} as unavailable"
+          fi
+
       # Last on purpose: everything it states has already happened.
       - name: Create or update the GitHub release
         if: success() && steps.recheck.outputs.publish == 'true'
@@ -322,8 +399,8 @@ jobs:
           BODY="$RUNNER_TEMP/release.md"
           # shellcheck disable=SC2016
           {
-            printf 'Container image for DeepSeek Harness %s, built from the npm release of upstream tag [%s](https://github.com/%s/releases/tag/%s). Published to Docker Hub as `%s:%s`.\n\n' \
-              "$VERSION" "$UP_TAG" "$UPSTREAM" "$UP_TAG" "$IMAGE" "${TAG#v}"
+            printf 'Container image for DeepSeek Harness %s, built from the npm release of upstream tag [%s](https://github.com/%s/releases/tag/%s). Published to Docker Hub as `%s:%s`, with a best-effort mirror on [GHCR](%s).\n\n' \
+              "$VERSION" "$UP_TAG" "$UPSTREAM" "$UP_TAG" "$IMAGE" "${TAG#v}" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/pkgs/container/${GHCR##*/}"
             printf '| Digest | Tag commit | Build run |\n| --- | --- | --- |\n'
             printf "| \`%s\` | %s | [%s](%s/%s/actions/runs/%s) |\n\n" \
               "${DIGEST:-unknown}" "$SHA" "$BUILD_RUN" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$BUILD_RUN"
