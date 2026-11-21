@@ -23,7 +23,7 @@ only what the agent should be able to change.
 - **x86_64** Docker host. The image is built for `linux/amd64`.
 - **Extra Parameters** `--security-opt seccomp=unconfined --security-opt systempaths=unconfined`
   on hosts without Landlock, which includes Unraid. See [Command sandbox](#command-sandbox).
-- A model provider: a DeepSeek API key, or any OpenAI-compatible endpoint (for example Ollama).
+- A model provider: a DeepSeek API key or any OpenAI-compatible endpoint (e.g. Ollama).
 
 ## How the image is built
 
