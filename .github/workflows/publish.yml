@@ -46,7 +46,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  NAMESPACE: 0x1917
+  # Quoted: unquoted, YAML reads 0x1917 as the hex number 6423.
+  NAMESPACE: "0x1917"
   IMAGE: 0x1917/deepseek-harness
   ARTIFACT: deepseek-harness-image
   UPSTREAM: deepseek-ai/deepseek-harness
