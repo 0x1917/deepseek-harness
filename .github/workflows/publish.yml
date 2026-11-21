@@ -6,10 +6,10 @@
 # and only then pushes to Docker Hub, tags the source, and cuts the GitHub
 # release. Nothing here can build.
 #
-# Docker Hub visibility is set by VISIBILITY below. Pushing to a missing
-# repository creates it with the account's default visibility (usually public),
-# so the push is gated on the repository existing with the visibility asked for;
-# a missing one is created with it first.
+# The scripts this workflow runs (the smoke test, scripts/tags.mjs) come from
+# the default branch, never from the build run's commit: this job holds a
+# write token, so it executes only code already on master. The build run's
+# commit is used as data alone, as the target of the source tag.
 #
 # Tags: the first publish of an upstream version gets the bare version
 # (v0.2.2-rc.5 in git, 0.2.2-rc.5 on the registry); a rebuild of it gets
@@ -47,11 +47,9 @@ concurrency:
 
 env:
   NAMESPACE: 0x1917
-  REPOSITORY: deepseek-harness
   IMAGE: 0x1917/deepseek-harness
   ARTIFACT: deepseek-harness-image
   UPSTREAM: deepseek-ai/deepseek-harness
-  VISIBILITY: private   # private or public
 
 jobs:
   publish:
@@ -121,12 +119,22 @@ jobs:
         if: steps.meta.outputs.publish != 'true'
         run: echo "that build was not marked for publishing, so this run stops here"
 
+      # The default branch, not the build run's commit (see the header).
+      # fetch-depth 0 brings the target commit and the remote's tags along.
       - uses: actions/checkout@v7
         if: steps.meta.outputs.publish == 'true'
         with:
-          ref: ${{ steps.target.outputs.sha }}
-          fetch-depth: 0   # the tag step reads the remote's tags
+          fetch-depth: 0
           persist-credentials: false
+
+      - name: Confirm the target commit is on master
+        if: steps.meta.outputs.publish == 'true'
+        env:
+          SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor "$SHA" HEAD \
+            || { echo "build run commit $SHA is not on master (force-pushed away?), refusing to tag it" >&2; exit 1; }
 
       - name: Load the tested image
         if: steps.meta.outputs.publish == 'true'
@@ -160,10 +168,11 @@ jobs:
         if: steps.meta.outputs.publish == 'true'
         env:
           VERSION: ${{ steps.meta.outputs.version }}
+          SHA: ${{ steps.target.outputs.sha }}
         run: |
           set -euo pipefail
           BASE="v${VERSION}"
-          TAG=$(git tag --points-at HEAD | node scripts/tags.mjs version "$VERSION")
+          TAG=$(git tag --points-at "$SHA" | node scripts/tags.mjs version "$VERSION")
           # A tag on this commit is only this run's when its note names this
           # build run; a new build of a published commit is a rebuild.
           if [ -n "$TAG" ] && ! git tag -l --format='%(contents)' "$TAG" | grep -Fq "build run $RUN_ID)"; then
@@ -201,39 +210,6 @@ jobs:
         with:
           username: ${{ env.NAMESPACE }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      # The visibility gate. Nothing is pushed unless Docker Hub reports the
-      # repository with the visibility VISIBILITY asks for.
-      - name: Ensure the Docker Hub repository visibility
-        if: steps.meta.outputs.publish == 'true'
-        env:
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          case "$VISIBILITY" in
-            private) WANT=true ;;
-            public)  WANT=false ;;
-            *) echo "VISIBILITY must be private or public, not '$VISIBILITY'" >&2; exit 1 ;;
-          esac
-          HUB=https://hub.docker.com/v2
-          JWT=$(jq -n --arg u "$NAMESPACE" --arg s "$DOCKERHUB_TOKEN" '{identifier:$u, secret:$s}' \
-                | curl -fsS -H 'Content-Type: application/json' -d @- "$HUB/auth/token" | jq -r .access_token)
-          [ -n "$JWT" ] && [ "$JWT" != null ] || { echo "Docker Hub API login failed" >&2; exit 1; }
-          repo() { curl -sS -o "$RUNNER_TEMP/repo.json" -w '%{http_code}' -H "Authorization: Bearer $JWT" \
-                     "$HUB/namespaces/$NAMESPACE/repositories/$REPOSITORY"; }
-          CODE=$(repo)
-          if [ "$CODE" = 404 ]; then
-            echo "$IMAGE does not exist yet, creating it $VISIBILITY"
-            jq -n --arg n "$REPOSITORY" --argjson p "$WANT" '{name:$n, is_private:$p}' \
-              | curl -fsS -o /dev/null -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
-                  -d @- "$HUB/namespaces/$NAMESPACE/repositories" \
-              || { echo "::error::could not create $IMAGE; create it ($VISIBILITY) on Docker Hub and re-run" >&2; exit 1; }
-            CODE=$(repo)
-          fi
-          [ "$CODE" = 200 ] || { echo "Docker Hub answered $CODE for $IMAGE" >&2; exit 1; }
-          [ "$(jq -r .is_private "$RUNNER_TEMP/repo.json")" = "$WANT" ] \
-            || { echo "::error::$IMAGE is not $VISIBILITY on Docker Hub; refusing to push" >&2; exit 1; }
-          echo "$IMAGE is $VISIBILITY"
 
       - name: Tag and push the image
         if: steps.meta.outputs.publish == 'true'
@@ -274,20 +250,21 @@ jobs:
         env:
           TAG: ${{ steps.pubtag.outputs.tag }}
           NOTE: ${{ steps.pubtag.outputs.note }}
+          SHA: ${{ steps.target.outputs.sha }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           # Checkout kept no credentials; the push authenticates here, after the
           # image is already published.
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          if git tag --points-at HEAD | grep -Fxq "$TAG"; then
+          if git tag --points-at "$SHA" | grep -Fxq "$TAG"; then
             echo "this commit already carries $TAG, nothing to tag"
             echo "tag=$TAG" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG" -m "$NOTE"
+          git tag -a "$TAG" -m "$NOTE" "$SHA"
           git push origin "refs/tags/$TAG"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
