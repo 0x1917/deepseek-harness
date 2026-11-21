@@ -49,7 +49,7 @@ jobs:
     # The check context equals this name. A ruleset that requires "build"
     # silently disarms if it changes.
     name: build
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
