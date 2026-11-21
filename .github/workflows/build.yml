@@ -78,6 +78,7 @@ jobs:
             if [ "$FORCE" = "true" ]; then
               echo "forced by the dispatch input, packaging for publish"
               echo "publish=true" >> "$GITHUB_OUTPUT"
+              echo "forced=true" >> "$GITHUB_OUTPUT"
             else
               echo "dispatch without force_publish, so build and smoke only"
               echo "publish=false" >> "$GITHUB_OUTPUT"
@@ -185,13 +186,14 @@ jobs:
         env:
           VERSION: ${{ steps.meta.outputs.version }}
           PUBLISH: ${{ steps.scope.outputs.publish }}
+          FORCED: ${{ steps.scope.outputs.forced || 'false' }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/bundle"
           ID=$(docker image inspect --format '{{.Id}}' deepseek-harness:test)
           jq -n --arg v "$VERSION" --arg id "$ID" --arg sha "$GITHUB_SHA" --arg run "$GITHUB_RUN_ID" \
-                --argjson pub "${PUBLISH:-false}"                                                  \
-                '{version:$v, image_id:$id, commit:$sha, build_run:$run, publish:$pub}'            \
+                --argjson pub "${PUBLISH:-false}" --argjson forced "$FORCED"                       \
+                '{version:$v, image_id:$id, commit:$sha, build_run:$run, publish:$pub, forced:$forced}' \
                 > "$RUNNER_TEMP/bundle/meta.json"
           cat "$RUNNER_TEMP/bundle/meta.json"
 

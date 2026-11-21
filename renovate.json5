@@ -9,6 +9,8 @@
   $schema: 'https://docs.renovatebot.com/renovate-schema.json',
   extends: ['config:recommended'],
   labels: ['dependencies'],
+  // No standing Dependency Dashboard issue: pending updates arrive as PRs.
+  dependencyDashboard: { enabled: false },
   customManagers: [
     {
       // Upstream cuts no GitHub "latest" release (every release is a

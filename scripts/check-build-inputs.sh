@@ -26,7 +26,8 @@ covered() {
 }
 
 # Join continuation lines, then read the sources of every COPY/ADD that reads the build
-# context (a --from= copy reads another stage or image, not this repository).
+# context (a --from= copy reads another stage or image, a URL the network, not this
+# repository).
 while IFS= read -r line; do
   read -r -a words <<< "$line"
   args=()
@@ -39,6 +40,8 @@ while IFS= read -r line; do
   done
   [ "${#args[@]}" -ge 2 ] || continue
   for src in "${args[@]:0:${#args[@]}-1}"; do
+    # A remote ADD fetches a URL, not the build context; the Dockerfile pins it.
+    case "$src" in http://*|https://*) continue ;; esac
     src=${src#./}; src=${src%/}
     covered "$src" || { echo "Dockerfile copies '$src', which .github/build-inputs does not list" >&2; rc=1; }
   done

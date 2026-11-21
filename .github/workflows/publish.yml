@@ -114,6 +114,7 @@ jobs:
             echo "version=$(jq -r .version "$BUNDLE/meta.json")"
             echo "image_id=$(jq -r .image_id "$BUNDLE/meta.json")"
             echo "publish=$(jq -r .publish "$BUNDLE/meta.json")"
+            echo "forced=$(jq -r '.forced // false' "$BUNDLE/meta.json")"
           } >> "$GITHUB_OUTPUT"
 
       - name: Nothing to publish
@@ -137,8 +138,31 @@ jobs:
           git merge-base --is-ancestor "$SHA" HEAD \
             || { echo "build run commit $SHA is not on master (force-pushed away?), refusing to tag it" >&2; exit 1; }
 
-      - name: Load the tested image
+      # Re-checked here, not only in build: build decides before an earlier publish
+      # has created its tag, so two pushes in quick succession both compare against
+      # the old baseline and the second republishes an unchanged image as -r<n>.
+      # Publish runs are serialised, so by now the highest tag is current. A forced
+      # build (a base image rebuild) skips the check.
+      - name: Confirm the image changed since the last release
+        id: recheck
         if: steps.meta.outputs.publish == 'true'
+        env:
+          SHA: ${{ steps.target.outputs.sha }}
+          FORCED: ${{ steps.meta.outputs.forced }}
+        run: |
+          set -euo pipefail
+          LAST=$(git tag -l 'v*' | node scripts/tags.mjs max)
+          INPUTS=()
+          while IFS= read -r p; do INPUTS+=("$p"); done < <(grep -vE '^[[:space:]]*(#|$)' .github/build-inputs)
+          if [ "$FORCED" = true ] || [ -z "$LAST" ] || ! git diff --quiet "$LAST" "$SHA" -- "${INPUTS[@]}"; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "no build input changed between $LAST and $SHA (another publish got there first), so nothing to publish"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Load the tested image
+        if: steps.recheck.outputs.publish == 'true'
         run: |
           set -euo pipefail
           BUNDLE="$RUNNER_TEMP/bundle"
@@ -152,13 +176,13 @@ jobs:
 
       # Same runner kernel restriction as in build.yml, for the bubblewrap check.
       - name: Allow unprivileged user namespaces
-        if: steps.meta.outputs.publish == 'true'
+        if: steps.recheck.outputs.publish == 'true'
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       # The bytes travelled through an artifact store, so the gate runs again on
       # what actually arrived rather than trusting the build run's log.
       - name: Run the smoke test on the loaded image
-        if: steps.meta.outputs.publish == 'true'
+        if: steps.recheck.outputs.publish == 'true'
         env:
           SMOKE_DOCKER_ARGS: --security-opt apparmor=unconfined
         run: bash scripts/smoke-test.sh deepseek-harness:test
@@ -166,7 +190,7 @@ jobs:
       # Computed from read-only git state BEFORE anything is pushed.
       - name: Resolve the publish tag
         id: pubtag
-        if: steps.meta.outputs.publish == 'true'
+        if: steps.recheck.outputs.publish == 'true'
         env:
           VERSION: ${{ steps.meta.outputs.version }}
           SHA: ${{ steps.target.outputs.sha }}
@@ -206,14 +230,14 @@ jobs:
           echo "publish tag: $TAG (registry tag: ${TAG#v}, push_latest=$PUSH_LATEST)"
 
       - name: Log in to Docker Hub
-        if: steps.meta.outputs.publish == 'true'
+        if: steps.recheck.outputs.publish == 'true'
         uses: docker/login-action@v4
         with:
           username: ${{ env.NAMESPACE }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Tag and push the image
-        if: steps.meta.outputs.publish == 'true'
+        if: steps.recheck.outputs.publish == 'true'
         env:
           REGISTRY_TAG: ${{ steps.pubtag.outputs.registry_tag }}
           PUSH_LATEST: ${{ steps.pubtag.outputs.push_latest }}
@@ -230,7 +254,7 @@ jobs:
 
       - name: Verify the pushed digest
         id: digests
-        if: steps.meta.outputs.publish == 'true'
+        if: steps.recheck.outputs.publish == 'true'
         env:
           REGISTRY_TAG: ${{ steps.pubtag.outputs.registry_tag }}
           PUSH_LATEST: ${{ steps.pubtag.outputs.push_latest }}
@@ -247,7 +271,7 @@ jobs:
 
       - name: Create the source tag
         id: tag
-        if: steps.meta.outputs.publish == 'true'
+        if: steps.recheck.outputs.publish == 'true'
         env:
           TAG: ${{ steps.pubtag.outputs.tag }}
           NOTE: ${{ steps.pubtag.outputs.note }}
@@ -271,7 +295,7 @@ jobs:
 
       # Last on purpose: everything it states has already happened.
       - name: Create or update the GitHub release
-        if: success() && steps.meta.outputs.publish == 'true'
+        if: success() && steps.recheck.outputs.publish == 'true'
         env:
           VERSION: ${{ steps.meta.outputs.version }}
           TAG: ${{ steps.tag.outputs.tag }}
