@@ -51,20 +51,24 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/dsh-entrypoint"]
 
 # Last, so the per-build values below never invalidate the cached layers above. source is
-# this repository, whose v<version> releases are what 3U and similar tools look up.
+# this repository, whose v<version> releases are what 3U and similar tools look up. The
+# net.unraid.docker labels give the Docker tab an icon and a WebUI link even for a
+# container not created from the template (docker run, compose).
 ARG VCS_REF=dev
 ARG BUILD_DATE=unknown
 ARG BASE_DIGEST=unknown
-LABEL org.opencontainers.image.title="DeepSeek Harness"                                                          \
-      org.opencontainers.image.description="An open-source AI coding agent."                                     \
-      org.opencontainers.image.authors="0x1917 (https://github.com/0x1917)"                                      \
-      org.opencontainers.image.source="https://github.com/0x1917/deepseek-harness"                               \
-      org.opencontainers.image.url="https://deepseek.com/en/harness/"                                            \
-      org.opencontainers.image.documentation="https://github.com/0x1917/deepseek-harness/blob/master/README.md"  \
-      org.opencontainers.image.licenses="MIT"                                                                    \
-      org.opencontainers.image.version="${DSH_VERSION}"                                                          \
-      org.opencontainers.image.ref.name="${DSH_VERSION}"                                                         \
-      org.opencontainers.image.revision="${VCS_REF}"                                                             \
-      org.opencontainers.image.created="${BUILD_DATE}"                                                           \
-      org.opencontainers.image.base.name="node:24-slim"                                                          \
-      org.opencontainers.image.base.digest="${BASE_DIGEST}"
+LABEL org.opencontainers.image.title="DeepSeek Harness"                                                              \
+      org.opencontainers.image.description="An open-source AI coding agent."                                         \
+      org.opencontainers.image.authors="0x1917 (https://github.com/0x1917)"                                          \
+      org.opencontainers.image.source="https://github.com/0x1917/deepseek-harness"                                   \
+      org.opencontainers.image.url="https://deepseek.com/en/harness/"                                                \
+      org.opencontainers.image.documentation="https://github.com/0x1917/deepseek-harness/blob/master/README.md"      \
+      org.opencontainers.image.licenses="MIT"                                                                        \
+      org.opencontainers.image.version="${DSH_VERSION}"                                                              \
+      org.opencontainers.image.ref.name="${DSH_VERSION}"                                                             \
+      org.opencontainers.image.revision="${VCS_REF}"                                                                 \
+      org.opencontainers.image.created="${BUILD_DATE}"                                                               \
+      org.opencontainers.image.base.name="node:24-slim"                                                              \
+      org.opencontainers.image.base.digest="${BASE_DIGEST}"                                                          \
+      net.unraid.docker.icon="https://raw.githubusercontent.com/0x1917/unraid-templates/master/assets/dsh/icon.png"  \
+      net.unraid.docker.webui="http://[IP]:[PORT:3080]/"
