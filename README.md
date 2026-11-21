@@ -8,7 +8,7 @@
 [![Platform](https://img.shields.io/badge/platform-linux%2Famd64-blue?logo=linux&logoColor=white)](#requirements)
 [![License](https://img.shields.io/github/license/0x1917/deepseek-harness)](https://github.com/0x1917/deepseek-harness/blob/master/LICENSE)
 
-The [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) web UI repackaged as a container for Unraid. To install it, search for it on the Community Applications plugin
+The [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)  web UI repackaged as a container for Unraid. To install it, search for it on the Community Applications plugin
 or install it manually with the DSH template from [0x1917/unraid-templates](https://github.com/0x1917/unraid-templates/blob/master/templates/my-deepseek-harness.xml) (copy it to `/boot/config/plugins/dockerMan/templates-user/`).
 
 DeepSeek Harness is an AI coding agent you drive from the browser: give it a workspace and it
