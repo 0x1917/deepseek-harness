@@ -38,7 +38,7 @@
       labels: ['dependencies', 'upstream'],
     },
     {
-      // Pin node:24-slim by digest so base image fixes (Debian security
+      // Pin the node base image by digest so base image fixes (Debian security
       // updates, Node patch releases) arrive as PRs. Merging one republishes the
       // same dsh version as a -r<n> rebuild. Batched weekly to limit churn.
       matchDatasources: ['docker'],

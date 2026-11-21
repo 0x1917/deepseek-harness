@@ -1,6 +1,7 @@
 # Static checks that need no image: workflow schema (actionlint, which also
-# lints the shell inside `run:` blocks), the shell scripts (shellcheck), and the
-# tag-ordering tests the publish workflow depends on.
+# lints the shell inside `run:` blocks), the shell scripts (shellcheck), the
+# build-inputs coverage check, and the tag-ordering tests the publish workflow
+# depends on.
 #
 # One job, one check context (`lint`), independent verdicts: each check runs to
 # completion and the last step reports all of them before failing the job.
@@ -39,6 +40,11 @@ jobs:
           shellcheck --version >/dev/null || { echo "shellcheck not on the runner" >&2; exit 1; }
           shellcheck -x -S warning runtime/*.sh scripts/*.sh
 
+      - name: build inputs cover the Dockerfile
+        id: inputs
+        continue-on-error: true
+        run: bash scripts/check-build-inputs.sh
+
       - name: tag ordering tests
         id: tags
         continue-on-error: true
@@ -50,13 +56,16 @@ jobs:
           ACTIONLINT: ${{ steps.actionlint.outcome }}
           SHELLCHECK: ${{ steps.shellcheck.outcome }}
           TAGS: ${{ steps.tags.outcome }}
+          INPUTS: ${{ steps.inputs.outcome }}
         run: |
           set -uo pipefail
           echo "actionlint: $ACTIONLINT"
           echo "shellcheck: $SHELLCHECK"
           echo "tags:       $TAGS"
+          echo "inputs:     $INPUTS"
           rc=0
           [ "$ACTIONLINT" = "success" ] || { echo "::error::actionlint failed"; rc=1; }
           [ "$SHELLCHECK" = "success" ] || { echo "::error::shellcheck failed"; rc=1; }
           [ "$TAGS" = "success" ] || { echo "::error::tag ordering tests failed"; rc=1; }
+          [ "$INPUTS" = "success" ] || { echo "::error::the Dockerfile copies a path .github/build-inputs does not list"; rc=1; }
           exit "$rc"

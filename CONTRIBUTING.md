@@ -22,6 +22,7 @@ CI runs all of these, and a pull request that fails them will not be reviewed un
 
 ```sh
 node --test scripts/tags.test.mjs
+bash scripts/check-build-inputs.sh
 shellcheck -x -S warning runtime/*.sh scripts/*.sh
 actionlint .github/workflows/*.yml
 ```
@@ -37,7 +38,7 @@ bash scripts/smoke-test.sh deepseek-harness:test
 The smoke test boots the image the way the Unraid template does and checks health, the
 version, the 99:100 privilege drop, `/data` ownership, the default workspace, the bubblewrap
 sandbox, token login, the client bundle and the host fence. It needs `docker`, `curl` and
-`bash`, and takes about 30 seconds. On Ubuntu 24.04 the sandbox check needs the two AppArmor
+`bash`, and takes about 30 seconds. On Ubuntu (24.04 on) the sandbox check needs the two AppArmor
 restrictions lifted, as CI does (see the comment at the top of the script).
 
 ## The invariants the tests enforce

@@ -27,7 +27,7 @@ only what the agent should be able to change.
 
 ## How the image is built
 
-Nothing is compiled here. The Dockerfile starts from `node:24-slim`, installs the published
+Nothing is compiled here. The Dockerfile starts from `node:26-slim` (pinned by digest), installs the published
 [`@deepseek-ai/dsh`](https://www.npmjs.com/package/@deepseek-ai/dsh) CLI at the release named by
 `ARG DSH_VERSION`, and adds what a container needs around it:
 
@@ -174,7 +174,7 @@ bash scripts/smoke-test.sh deepseek-harness:test
 | the client bundle loads                                | the web UI is served, not just the document            |
 | untrusted `Host` gets 403, a trusted one passes        | `DSH_TRUSTED_HOSTS` reaches dsh's host fence           |
 
-On Ubuntu 24.04 the bubblewrap check needs two AppArmor restrictions lifted that Unraid does not
+On Ubuntu runners (24.04 on) the bubblewrap check needs two AppArmor restrictions lifted that Unraid does not
 have; CI does so, and the comment at the top of the script shows how.
 
 Deliberate gaps: anything needing a model (a real agent turn, a command run through dsh's own
@@ -186,11 +186,11 @@ sandbox selection), TLS and reverse-proxy behaviour, and the agent's tools.
 
 Two workflows, chained, plus lint. Neither of the first two can do the other's job.
 
-| Workflow      | Trigger                                | Does                                                                |
-| ------------- | -------------------------------------- | ------------------------------------------------------------------- |
-| `build.yml`   | every push and PR, weekly, dispatch    | build, smoke test, and package the image as an artifact             |
-| `publish.yml` | `workflow_run` after `build` completes | load that run's artifact, verify it, push, tag, and cut the release |
-| `lint.yml`    | every push and PR                      | actionlint, shellcheck, the tag-ordering tests                      |
+| Workflow      | Trigger                                | Does                                                                   |
+| ------------- | -------------------------------------- | ---------------------------------------------------------------------- |
+| `build.yml`   | every push and PR, weekly, dispatch    | build, smoke test, and package the image as an artifact                |
+| `publish.yml` | `workflow_run` after `build` completes | load that run's artifact, verify it, push, tag, and cut the release    |
+| `lint.yml`    | every push and PR                      | actionlint, shellcheck, the build-inputs check, the tag-ordering tests |
 
 Build never touches the registry. Publish never builds. The image crosses the boundary as
 `docker save | zstd` plus a `meta.json` holding the image ID, the version, and the publish
@@ -199,10 +199,14 @@ decision.
 | Event                                                      | Build | Publish |
 | ---------------------------------------------------------- | ----- | ------- |
 | push to `master` changing a build input since the last tag | yes   | yes     |
-| push to `master` changing only CI, docs, or scripts        | yes   | no      |
+| push to `master` changing nothing that reaches the image   | yes   | no      |
 | pull request, other branch, or the weekly run              | yes   | no      |
 | dispatch, `force_publish=false`                            | yes   | no      |
 | dispatch, `force_publish=true`                             | yes   | yes     |
+
+Build inputs are the paths that reach the image, listed in [`.github/build-inputs`](.github/build-inputs):
+`Dockerfile`, `.dockerignore`, and `runtime/`. Lint fails if the Dockerfile copies from any other
+path, so a new `COPY` source cannot change the image without publishing it.
 
 The baseline for "changed" is the highest published `v*` tag, not the previous push, so a
 force-push or a README-only amend never republishes. A failed publish leaves no tag, so the next
@@ -238,7 +242,7 @@ Upstream publishes no GitHub "latest" release, only prereleases on `dsh-v*` git 
 npm package of the same version. [`renovate.json5`](renovate.json5) has Renovate follow those
 tags and propose each newer `rc` (never an `alpha`) as a pull request that bumps
 `ARG DSH_VERSION`. Its pull requests trigger `build` and `lint`, so the smoke test runs before
-anything is merged, and merging publishes. Renovate also pins `node:24-slim` by digest, batching
+anything is merged, and merging publishes. Renovate also keeps the `node` base image pinned by digest, batching
 base-image updates weekly (merging one republishes the same version as `-r<n>`), and groups
 GitHub Actions updates.
 

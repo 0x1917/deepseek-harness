@@ -6,7 +6,7 @@
 #   scripts/smoke-test.sh [image]        (default: deepseek-harness:test)
 #
 # The command sandbox check runs bubblewrap, the path Unraid takes (its kernel
-# has no Landlock). Ubuntu 24.04 runners add two AppArmor restrictions Unraid
+# has no Landlock). Ubuntu runners (24.04 on) add two AppArmor restrictions Unraid
 # doesn't have, so CI lifts both to test the Unraid path:
 #   sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 #   SMOKE_DOCKER_ARGS="--security-opt apparmor=unconfined"
