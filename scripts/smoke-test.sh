@@ -83,6 +83,17 @@ case ":$(docker exec -u node "$NAME" printenv PATH):" in
 esac
 pass "user-level installs (npm -g, pip --user) land in /home/node/.local, on PATH"
 
+# The agent's toolset, as the app user: present, and the compiler and uv actually work
+# (a missing linker or an unwritable uv cache would pass a plain `command -v`).
+missing=$(docker exec -u node "$NAME" sh -c 'for t in ssh git curl rg jq unzip xz ps make gcc python3 uv uvx; do
+  command -v "$t" >/dev/null || printf "%s " "$t"; done')
+[ -z "$missing" ] || die "agent tools missing: $missing"
+docker exec -u node "$NAME" sh -c 'printf "int main(void){return 0;}\n" | gcc -x c - -o /tmp/smoke-cc && /tmp/smoke-cc' \
+  || die "gcc cannot compile and link a program"
+docker exec -u node -w /tmp "$NAME" sh -c 'uv venv -q --offline /tmp/smoke-venv && /tmp/smoke-venv/bin/python -c "import sys"' \
+  || die "uv cannot create a virtual environment as the app user"
+pass "agent tools present as the app user; gcc links, uv creates a venv"
+
 docker exec -u node "$NAME" bwrap --ro-bind / / --dev /dev --proc /proc --unshare-pid --unshare-user true \
   || die "bubblewrap cannot create a sandbox"
 pass "bubblewrap sandbox works"

@@ -4,19 +4,37 @@ FROM node:26-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d18
 # dsh-v* git tags (renovate.json5).
 ARG DSH_VERSION=0.2.2-rc.5
 
-# Tools the agent commonly shells out to. bubblewrap is the command sandbox on kernels
-# without Landlock (Unraid); it needs --security-opt seccomp=unconfined and systempaths=unconfined.
+# The container's own needs: bubblewrap is the command sandbox on kernels without Landlock
+# (Unraid; it needs --security-opt seccomp=unconfined and systempaths=unconfined), gosu
+# and tini run the entrypoint, xdg-user-dirs locates dsh's default workspace.
+#
+# The rest is for the agent, which runs unprivileged and cannot apt install: ssh (also
+# dsh's SSH workspaces), build tools and python3 (npm and pip packages that compile native
+# code; node-gyp needs both), and the everyday shell tools. User-level installs (uv, pip,
+# npm -g) land in the persistent /home/node instead.
 RUN apt-get update                              \
  && apt-get install -y --no-install-recommends  \
       bubblewrap                                \
+      build-essential                           \
       ca-certificates                           \
       curl                                      \
       git                                       \
       gosu                                      \
+      jq                                        \
+      openssh-client                            \
+      procps                                    \
       python3                                   \
+      ripgrep                                   \
       tini                                      \
+      unzip                                     \
       xdg-user-dirs                             \
+      xz-utils                                  \
  && rm -rf /var/lib/apt/lists/*
+
+# uv and uvx, from Astral's published image (Renovate bumps the tag and pins its digest).
+# Python tools then run as `uvx <tool>`, and `uv python install` adds other Pythons, all
+# into /home/node without root.
+COPY --from=ghcr.io/astral-sh/uv:0.13.9 /uv /uvx /usr/local/bin/
 
 RUN npm install -g "@deepseek-ai/dsh@${DSH_VERSION}" \
  && npm cache clean --force
