@@ -22,12 +22,13 @@ docker build -t dsh .
 Prebuilt on Docker Hub: `docker pull 0x1917/deepseek-harness:latest`.
 
 ```sh
-docker run -d                        \
-  --name dsh                         \
-  --restart unless-stopped           \
-  -p 3080:3080                       \
-  -v /mnt/user/appdata/dsh:/data     \
-  -v /mnt/user/workspace:/workspace  \
+docker run -d                                      \
+  --name dsh                                       \
+  --restart unless-stopped                         \
+  -p 3080:3080                                     \
+  -v /mnt/user/appdata/dsh/data:/data              \
+  -v /mnt/user/appdata/dsh/home:/home/node         \
+  -v /mnt/user/workspace:/workspace                \
   0x1917/deepseek-harness
 
 docker logs dsh   # prints the login URL

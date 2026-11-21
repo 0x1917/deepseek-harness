@@ -8,6 +8,10 @@ umask "${UMASK:-022}"
 if [ "$(id -u)" = 0 ]; then
   groupmod -o -g "$PGID" node
   usermod -o -u "$PUID" -g "$PGID" node
+  # /home/node is a volume, so a fresh one is empty: recreate the bin dir on PATH, and the
+  # XDG Documents dir, which must point at /workspace (dsh's default workspace lives there).
+  mkdir -p /home/node/.config /home/node/.local/bin
+  echo 'XDG_DOCUMENTS_DIR="/workspace"' > /home/node/.config/user-dirs.dirs
   find /data /home/node \( ! -user node -o ! -group node \) -exec chown -h node:node {} +
   # Only claim /workspace when empty: a mounted share should already be owned by PUID/PGID.
   if [ -z "$(ls -A /workspace)" ]; then chown node:node /workspace; fi

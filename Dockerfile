@@ -21,33 +21,50 @@ RUN apt-get update                              \
 RUN npm install -g "@deepseek-ai/dsh@${DSH_VERSION}" \
  && npm cache clean --force
 
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+# Runtime files are staged with COPY, installed at their target paths in one place, and the
+# staging dir removed in the same layer.
+COPY runtime/ /tmp/dsh-runtime/
+RUN install -D -m 755 /tmp/dsh-runtime/entrypoint.sh   /usr/local/bin/dsh-entrypoint   \
+ && install -D -m 755 /tmp/dsh-runtime/healthcheck.sh  /usr/local/bin/dsh-healthcheck  \
+ && rm -rf /tmp/dsh-runtime
 
-ENV DSH_HOME=/data  \
-    DSH_PORT=3080   \
-    PUID=99         \
-    PGID=100
+# /home/node is a volume so tools the agent installs survive restarts. npm's global prefix
+# defaults to /usr/local, which the unprivileged user cannot write, so global installs go to
+# ~/.local instead, next to pip --user and uv tool; its bin dir comes first on PATH.
+ENV DSH_HOME=/data                          \
+    DSH_PORT=3080                           \
+    PUID=99                                 \
+    PGID=100                                \
+    NPM_CONFIG_PREFIX=/home/node/.local     \
+    PATH=/home/node/.local/bin:$PATH
 
-# dsh puts its default workspace under the XDG Documents dir; point that at /workspace.
-RUN mkdir -p /data /workspace /home/node/.config  \
- && echo 'XDG_DOCUMENTS_DIR="/workspace"'         \
- > /home/node/.config/user-dirs.dirs
+RUN mkdir -p /data /workspace /home/node/.local/bin
 
-# Starts as root; entrypoint.sh remaps node to PUID/PGID and drops to it via gosu.
+# Starts as root; dsh-entrypoint remaps node to PUID/PGID and drops to it via gosu.
 WORKDIR /workspace
-VOLUME ["/data", "/workspace"]
+VOLUME ["/data", "/workspace", "/home/node"]
 EXPOSE 3080
 
-# dsh has no health endpoint and only listens on the container IP; any HTTP reply (even 401) means it's up.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3  \
-  CMD curl -so /dev/null "http://${DSH_BIND:-$(hostname -i              \
-  | awk '{print $1}')}:${DSH_PORT}/"                                    \
-  || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD /usr/local/bin/dsh-healthcheck
 
-ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/dsh-entrypoint"]
 
-LABEL org.opencontainers.image.title="DeepSeek Harness"                                  \
-      org.opencontainers.image.description="An open-source AI coding agent."             \
-      org.opencontainers.image.source="https://github.com/deepseek-ai/deepseek-harness"  \
-      org.opencontainers.image.licenses="MIT"                                            \
-      org.opencontainers.image.version="${DSH_VERSION}"
+# Last, so the per-build values below never invalidate the cached layers above. source is
+# this repository, whose v<version> releases are what 3U and similar tools look up.
+ARG VCS_REF=dev
+ARG BUILD_DATE=unknown
+ARG BASE_DIGEST=unknown
+LABEL org.opencontainers.image.title="DeepSeek Harness"                                                          \
+      org.opencontainers.image.description="An open-source AI coding agent."                                     \
+      org.opencontainers.image.authors="0x1917 (https://github.com/0x1917)"                                      \
+      org.opencontainers.image.source="https://github.com/0x1917/deepseek-harness"                               \
+      org.opencontainers.image.url="https://deepseek.com/en/harness/"                                            \
+      org.opencontainers.image.documentation="https://github.com/0x1917/deepseek-harness/blob/master/README.md"  \
+      org.opencontainers.image.licenses="MIT"                                                                    \
+      org.opencontainers.image.version="${DSH_VERSION}"                                                          \
+      org.opencontainers.image.ref.name="${DSH_VERSION}"                                                         \
+      org.opencontainers.image.revision="${VCS_REF}"                                                             \
+      org.opencontainers.image.created="${BUILD_DATE}"                                                           \
+      org.opencontainers.image.base.name="node:24-slim"                                                          \
+      org.opencontainers.image.base.digest="${BASE_DIGEST}"

@@ -37,7 +37,7 @@ jobs:
         run: |
           set -euo pipefail
           shellcheck --version >/dev/null || { echo "shellcheck not on the runner" >&2; exit 1; }
-          shellcheck -x -S warning entrypoint.sh scripts/*.sh
+          shellcheck -x -S warning runtime/*.sh scripts/*.sh
 
       - name: tag ordering tests
         id: tags

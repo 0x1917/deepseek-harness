@@ -26,7 +26,7 @@ cleanup() {
   docker rm -f "$NAME" >/dev/null 2>&1 || true
   # The entrypoint re-owns the mounts to 99:100, so a non-root runner cannot
   # unlink them; the image itself (as root) can. Cleanup never decides the verdict.
-  docker run --rm --entrypoint rm -v "$DATA:/d" "$IMAGE" -rf /d/data /d/workspace >/dev/null 2>&1 || true
+  docker run --rm --entrypoint rm -v "$DATA:/d" "$IMAGE" -rf /d/data /d/workspace /d/home >/dev/null 2>&1 || true
   rm -rf "$DATA" 2>/dev/null || echo "note: left $DATA behind" >&2
 }
 trap cleanup EXIT
@@ -34,11 +34,11 @@ pass() { printf 'PASS  %s\n' "$1"; }
 die()  { printf 'FAIL  %s\n' "$1" >&2; docker logs "$NAME" 2>&1 | tail -25 >&2 || true; exit 1; }
 code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
 
-mkdir -p "$DATA/data" "$DATA/workspace"
+mkdir -p "$DATA/data" "$DATA/workspace" "$DATA/home"
 docker run -d --name "$NAME" -p 127.0.0.1::3080                          \
   --security-opt seccomp=unconfined --security-opt systempaths=unconfined \
   -e DSH_TRUSTED_HOSTS="$TRUSTED" "${EXTRA[@]}"                           \
-  -v "$DATA/data:/data" -v "$DATA/workspace:/workspace" "$IMAGE" >/dev/null
+  -v "$DATA/data:/data" -v "$DATA/workspace:/workspace" -v "$DATA/home:/home/node" "$IMAGE" >/dev/null
 PORT=$(docker port "$NAME" 3080/tcp | head -1 | sed 's/.*://')
 U="http://127.0.0.1:$PORT"
 
@@ -71,7 +71,17 @@ pass "/data and the empty /workspace are owned by 99:100"
 
 docs=$(docker exec -u node "$NAME" xdg-user-dir DOCUMENTS)
 [ "$docs" = /workspace ] || die "XDG Documents is '$docs', the default workspace cannot be created"
-pass "XDG Documents points at /workspace"
+pass "XDG Documents points at /workspace, on a fresh /home/node volume"
+
+prefix=$(docker exec -u node "$NAME" npm config get prefix)
+[ "$prefix" = /home/node/.local ] || die "npm's global prefix is '$prefix', not the persistent /home/node/.local"
+docker exec -u node "$NAME" sh -c 'touch /home/node/.local/bin/.w && rm /home/node/.local/bin/.w' \
+  || die "/home/node/.local/bin is not writable by the app user"
+case ":$(docker exec -u node "$NAME" printenv PATH):" in
+  *:/home/node/.local/bin:*) ;;
+  *) die "/home/node/.local/bin is not on PATH" ;;
+esac
+pass "user-level installs (npm -g, pip --user) land in /home/node/.local, on PATH"
 
 docker exec -u node "$NAME" bwrap --ro-bind / / --dev /dev --proc /proc --unshare-pid --unshare-user true \
   || die "bubblewrap cannot create a sandbox"

@@ -7,10 +7,10 @@ That split decides where a report belongs, so read the first section before open
 
 ## Where to report
 
-| Subject                                                           | Report it at                                                                              |
-| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| This image: `Dockerfile`, `entrypoint.sh`, the sandbox, workflows | [Private report here](https://github.com/0x1917/deepseek-harness/security/advisories/new) |
-| Upstream app: the agent, tools, plugins, auth, the web UI         | Report it here privately; see below                                                       |
+| Subject                                                      | Report it at                                                                              |
+| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| This image: `Dockerfile`, `runtime/`, the sandbox, workflows | [Private report here](https://github.com/0x1917/deepseek-harness/security/advisories/new) |
+| Upstream app: the agent, tools, plugins, auth, the web UI    | Report it here privately; see below                                                       |
 
 Upstream has no security policy and no private reporting channel: its issue tracker is
 closed and its [Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions)

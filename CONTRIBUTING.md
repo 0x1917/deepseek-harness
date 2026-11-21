@@ -2,7 +2,7 @@
 
 This repository packages [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
 (`dsh`) into a single container image and publishes it. It holds no application code: the
-`Dockerfile`, `entrypoint.sh`, and the CI workflows are the whole of it.
+`Dockerfile`, the `runtime/` scripts it installs, and the CI workflows are the whole of it.
 
 ## Where a report or a change belongs
 
@@ -22,7 +22,7 @@ CI runs all of these, and a pull request that fails them will not be reviewed un
 
 ```sh
 node --test scripts/tags.test.mjs
-shellcheck -x -S warning entrypoint.sh scripts/*.sh
+shellcheck -x -S warning runtime/*.sh scripts/*.sh
 actionlint .github/workflows/*.yml
 ```
 
