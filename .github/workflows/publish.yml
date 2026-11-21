@@ -59,7 +59,7 @@ jobs:
        github.event.workflow_run.head_branch == 'master' &&
        (github.event.workflow_run.event == 'push' ||
         github.event.workflow_run.event == 'workflow_dispatch'))
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     env:
       RUN_ID: ${{ github.event.workflow_run.id || inputs.build_run_id }}
