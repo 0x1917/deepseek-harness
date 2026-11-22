@@ -73,6 +73,15 @@
       pinDigests: true,
     },
     {
+      // The node major follows upstream's CI, not Docker Hub: Renovate cannot
+      // switch it without dropping the digest pin, so it proposes none and
+      // scripts/check-upstream-match.sh (lint) flags when upstream moves.
+      matchDatasources: ['docker'],
+      matchDepNames: ['node'],
+      matchUpdateTypes: ['major'],
+      enabled: false,
+    },
+    {
       matchDatasources: ['docker'],
       matchUpdateTypes: ['digest', 'pinDigest'],
       schedule: ['before 6am on monday'],

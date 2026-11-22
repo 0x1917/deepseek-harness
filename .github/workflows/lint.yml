@@ -1,7 +1,7 @@
 # Static checks that need no image: workflow schema (actionlint, which also
 # lints the shell inside `run:` blocks), the shell scripts (shellcheck), the
-# build-inputs coverage check, and the tag-ordering tests the publish workflow
-# depends on.
+# build-inputs coverage check, the tag-ordering tests the publish workflow
+# depends on, and that Node.js and pnpm match what upstream builds the release with.
 #
 # One job, one check context (`lint`), independent verdicts: each check runs to
 # completion and the last step reports all of them before failing the job.
@@ -50,6 +50,11 @@ jobs:
         continue-on-error: true
         run: node --test scripts/tags.test.mjs
 
+      - name: Node.js and pnpm match upstream
+        id: upstream
+        continue-on-error: true
+        run: bash scripts/check-upstream-match.sh
+
       - name: Verdict
         if: always()
         env:
@@ -57,15 +62,18 @@ jobs:
           SHELLCHECK: ${{ steps.shellcheck.outcome }}
           TAGS: ${{ steps.tags.outcome }}
           INPUTS: ${{ steps.inputs.outcome }}
+          UPSTREAM: ${{ steps.upstream.outcome }}
         run: |
           set -uo pipefail
           echo "actionlint: $ACTIONLINT"
           echo "shellcheck: $SHELLCHECK"
           echo "tags:       $TAGS"
           echo "inputs:     $INPUTS"
+          echo "upstream:   $UPSTREAM"
           rc=0
           [ "$ACTIONLINT" = "success" ] || { echo "::error::actionlint failed"; rc=1; }
           [ "$SHELLCHECK" = "success" ] || { echo "::error::shellcheck failed"; rc=1; }
           [ "$TAGS" = "success" ] || { echo "::error::tag ordering tests failed"; rc=1; }
           [ "$INPUTS" = "success" ] || { echo "::error::the Dockerfile copies a path .github/build-inputs does not list"; rc=1; }
+          [ "$UPSTREAM" = "success" ] || { echo "::error::Node.js or pnpm differs from upstream's (see the step log)"; rc=1; }
           exit "$rc"

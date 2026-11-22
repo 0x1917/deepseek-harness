@@ -96,15 +96,16 @@ pass "agent tools present as the app user; gcc links, uv creates a venv"
 
 # Office tools: dsh's libreoffice-kit converts with its WASM engine on Linux, which uses
 # only installed fonts and rejects every document when there are none. Render a minimal
-# .docx to PDF the way dsh does, from dsh's own install.
-docker exec -i -u node -w /tmp "$NAME" sh -s <<'SMOKE' || die "Office conversion fails (fonts or the LibreOffice engine missing)"
+# .docx to PDF the way dsh does, from dsh's own install; its text is partly Chinese, which
+# must come out in a CJK font (without one it falls back to Liberation, with no glyphs).
+docker exec -i -u node -w /tmp "$NAME" sh -s <<'SMOKE' || die "Office conversion fails (fonts, CJK fonts or the LibreOffice engine missing)"
 set -eu
 python3 - <<'PY'
 import zipfile
 with zipfile.ZipFile('/tmp/smoke.docx', 'w') as z:
     z.writestr('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>')
     z.writestr('_rels/.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>')
-    z.writestr('word/document.xml', '<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>dsh smoke test</w:t></w:r></w:p></w:body></w:document>')
+    z.writestr('word/document.xml', '<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>dsh smoke test 深度求索</w:t></w:r></w:p></w:body></w:document>')
 PY
 cd "$(dirname "$(readlink -f "$(command -v dsh)")")/.."
 node --input-type=module -e '
@@ -113,8 +114,9 @@ const converter = await createConverter({ timeoutMs: 120000 });
 try { await converter.render({ inputPath: "/tmp/smoke.docx", outputPath: "/tmp/smoke.pdf" }); }
 finally { await converter.dispose(); }'
 [ "$(head -c 5 /tmp/smoke.pdf)" = "%PDF-" ]
+LC_ALL=C grep -aq 'BaseFont */[A-Z]*+Noto[A-Za-z]*CJK' /tmp/smoke.pdf || { echo "the Chinese text has no CJK font" >&2; exit 1; }
 SMOKE
-pass "Office tools convert a document to PDF"
+pass "Office tools convert a document to PDF, Chinese text in a CJK font"
 
 docker exec -u node "$NAME" bwrap --ro-bind / / --dev /dev --proc /proc --unshare-pid --unshare-user true \
   || die "bubblewrap cannot create a sandbox"

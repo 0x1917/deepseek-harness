@@ -1,4 +1,6 @@
-FROM node:26-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc
+# The Node.js major upstream's CI tests (PRIMARY_NODE_VERSION), on the Debian release the
+# image's packages are chosen for. scripts/check-upstream-match.sh fails when upstream moves.
+FROM node:24-trixie-slim@sha256:af02d57b57719b9657a45199a79264a9437940cd55b3c7b3fc99615654f124a0
 
 # The npm release this image is built from. Renovate bumps it from upstream's
 # dsh-v* git tags (renovate.json5).
@@ -14,8 +16,9 @@ ARG PNPM_VERSION=11.28.5
 # The container's own needs: bubblewrap is the command sandbox on kernels without Landlock
 # (Unraid; it needs --security-opt seccomp=unconfined and systempaths=unconfined), gosu
 # and tini run the entrypoint, xdg-user-dirs locates dsh's default workspace. The fonts
-# are the families dsh's Office tools (libreoffice-kit) fall back to; its Linux WASM engine
-# uses only installed fonts, so without any every Office conversion and preview fails.
+# are the families dsh's Office tools (libreoffice-kit) fall back to, Noto CJK for Chinese
+# among them; its Linux WASM engine uses only installed fonts, so without any every Office
+# conversion and preview fails.
 #
 # The rest is for the agent, which runs unprivileged and cannot apt install: ssh (also
 # dsh's SSH workspaces), build tools and python3 (npm and pip packages that compile native
@@ -31,6 +34,7 @@ RUN apt-get update                              \
       fonts-crosextra-carlito                   \
       fonts-dejavu-core                         \
       fonts-liberation                          \
+      fonts-noto-cjk                            \
       git                                       \
       gosu                                      \
       jq                                        \

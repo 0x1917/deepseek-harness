@@ -27,7 +27,7 @@ only what the agent should be able to change.
 
 ## How the image is built
 
-Nothing is compiled here. The Dockerfile starts from `node:26-slim` (pinned by digest), installs the published
+Nothing is compiled here. The Dockerfile starts from `node:24-trixie-slim` (pinned by digest; Node 24 is what upstream's CI tests), installs the published
 [`@deepseek-ai/dsh`](https://www.npmjs.com/package/@deepseek-ai/dsh) CLI at the release named by
 `ARG DSH_VERSION`, and adds what a container needs around it:
 
@@ -37,7 +37,7 @@ Nothing is compiled here. The Dockerfile starts from `node:26-slim` (pinned by d
 - **`bubblewrap`**, dsh's command sandbox on kernels without Landlock.
 - **`pnpm`**, which dsh runs to look up and install plugins, pinned to the version upstream builds
   the release with.
-- **Fonts** (Liberation, DejaVu, Carlito, Caladea), which dsh's Office tools need to convert and
+- **Fonts** (Liberation, DejaVu, Carlito, Caladea, Noto CJK), which dsh's Office tools need to convert and
   preview documents.
 - **Tools for the agent**, which runs unprivileged and cannot `apt install`: `git`, `ssh`,
   `curl`, `ripgrep`, `jq`, `unzip`, `xz`, `procps`, `python3`, a C toolchain (`build-essential`,
