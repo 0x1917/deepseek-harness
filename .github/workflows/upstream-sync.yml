@@ -9,10 +9,11 @@
 # with its Node.js (re-pinned by digest) and pnpm.
 #
 # The script comes from the base branch, never from the PR (this job holds a
-# write token); the PR's checkout is only its target. A push with GITHUB_TOKEN
-# starts no workflows, so the job dispatches build and lint on the branch itself,
-# and their checks land on the new head commit. Once this job has committed,
-# Renovate treats the branch as edited and stops rebasing it.
+# write token); the PR's checkout is only its target. The push re-runs the PR's
+# checks, but github-actions[bot] counts as a first-time contributor here, so
+# GitHub holds those runs until someone clicks "Approve workflows to run" on the
+# PR; the required build and lint checks report only after that. Once this job
+# has committed, Renovate treats the branch as edited and stops rebasing it.
 
 name: upstream sync
 
@@ -22,7 +23,6 @@ on:
 
 permissions:
   contents: write   # push the fix to the PR branch
-  actions: write    # dispatch build and lint on it
 
 concurrency:
   group: upstream-sync-${{ github.event.pull_request.number }}
@@ -52,10 +52,9 @@ jobs:
       - name: Match upstream's Node.js and pnpm
         run: bash base/scripts/check-upstream-match.sh --fix pr
 
-      - name: Commit and re-run the checks
+      - name: Commit to the PR branch
         env:
           BRANCH: ${{ github.event.pull_request.head.ref }}
-          GH_TOKEN: ${{ github.token }}
         working-directory: pr
         run: |
           set -euo pipefail
@@ -69,5 +68,4 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -q -m "Match upstream dsh-v$dsh's Node.js and pnpm" -- Dockerfile
           git push origin "HEAD:$BRANCH"
-          gh workflow run build.yml --ref "$BRANCH"
-          gh workflow run lint.yml --ref "$BRANCH"
+          echo "::notice::Committed to $BRANCH; approve the held workflow runs on the PR to re-run its checks"
