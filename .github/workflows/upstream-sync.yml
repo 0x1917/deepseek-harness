@@ -1,0 +1,73 @@
+# Bring Renovate's PRs in line with upstream: Node.js major and pnpm.
+#
+# dsh pins pnpm and the Node.js major to what upstream builds the shipped release
+# with (scripts/check-upstream-match.sh, which lint also runs). Renovate bumps
+# DSH_VERSION, but cannot move the base image's major from upstream's file
+# without dropping its digest pin, and would bring pnpm only on its next run. So
+# on every Renovate PR this job runs the script with --fix and, when anything
+# changed, commits the result to the PR's branch: a dsh bump arrives as one PR
+# with its Node.js (re-pinned by digest) and pnpm.
+#
+# The script comes from the base branch, never from the PR (this job holds a
+# write token); the PR's checkout is only its target. A push with GITHUB_TOKEN
+# starts no workflows, so the job dispatches build and lint on the branch itself,
+# and their checks land on the new head commit. Once this job has committed,
+# Renovate treats the branch as edited and stops rebasing it.
+
+name: upstream sync
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write   # push the fix to the PR branch
+  actions: write    # dispatch build and lint on it
+
+concurrency:
+  group: upstream-sync-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    if: >
+      github.event.pull_request.head.repo.full_name == github.repository
+      && startsWith(github.event.pull_request.head.ref, 'renovate/')
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the base branch's scripts
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          persist-credentials: false
+
+      - name: Check out the PR branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          path: pr
+
+      - name: Match upstream's Node.js and pnpm
+        run: bash base/scripts/check-upstream-match.sh --fix pr
+
+      - name: Commit and re-run the checks
+        env:
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          GH_TOKEN: ${{ github.token }}
+        working-directory: pr
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- Dockerfile; then
+            echo "already matches upstream"
+            exit 0
+          fi
+          git diff -- Dockerfile
+          dsh=$(sed -n 's/^ARG DSH_VERSION=//p' Dockerfile | head -1)
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -q -m "Match upstream dsh-v$dsh's Node.js and pnpm" -- Dockerfile
+          git push origin "HEAD:$BRANCH"
+          gh workflow run build.yml --ref "$BRANCH"
+          gh workflow run lint.yml --ref "$BRANCH"

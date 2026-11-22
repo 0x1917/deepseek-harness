@@ -1,5 +1,6 @@
 # The Node.js major upstream's CI tests (PRIMARY_NODE_VERSION), on the Debian release the
-# image's packages are chosen for. scripts/check-upstream-match.sh fails when upstream moves.
+# image's packages are chosen for. upstream-sync.yml moves it with upstream on the dsh bump's
+# PR (scripts/check-upstream-match.sh --fix).
 FROM node:24-trixie-slim@sha256:af02d57b57719b9657a45199a79264a9437940cd55b3c7b3fc99615654f124a0
 
 # The npm release this image is built from. Renovate bumps it from upstream's
@@ -9,8 +10,9 @@ ARG DSH_VERSION=0.2.2-rc.5
 # pnpm, which dsh runs to look up and install plugins (`dsh plugin`, the Web UI's plugin
 # installer). The image ships no corepack, so without it every plugin lookup fails with
 # `spawn pnpm ENOENT`. Pinned to exactly the pnpm upstream builds this release with (the
-# packageManager of its package.json at the dsh-v${DSH_VERSION} tag); Renovate follows it.
-# Keep this ARG after DSH_VERSION: the Renovate lookup reads both in one match.
+# packageManager of its package.json at the dsh-v${DSH_VERSION} tag); Renovate and
+# upstream-sync.yml follow it. Keep this ARG after DSH_VERSION: the Renovate lookup reads
+# both in one match.
 ARG PNPM_VERSION=11.28.5
 
 # The container's own needs: bubblewrap is the command sandbox on kernels without Landlock

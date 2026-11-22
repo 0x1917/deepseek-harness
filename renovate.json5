@@ -29,8 +29,8 @@
     {
       // pnpm follows upstream exactly: the version is whatever the
       // packageManager field names at the dsh-v<DSH_VERSION> tag, so the match
-      // captures DSH_VERSION as the lookup's packageName. A dsh bump therefore
-      // brings its pnpm bump on the next run, once the new tag is in the file.
+      // captures DSH_VERSION as the lookup's packageName. A dsh bump's own PR
+      // already carries the matching pnpm: upstream-sync.yml commits it.
       customType: 'regex',
       description: 'pnpm, pinned to the one upstream builds the shipped release with',
       managerFilePatterns: ['/(^|/)Dockerfile$/'],
@@ -74,8 +74,9 @@
     },
     {
       // The node major follows upstream's CI, not Docker Hub: Renovate cannot
-      // switch it without dropping the digest pin, so it proposes none and
-      // scripts/check-upstream-match.sh (lint) flags when upstream moves.
+      // switch it from upstream's file without dropping the digest pin, so it
+      // proposes none. upstream-sync.yml moves it, re-pinned, on the dsh
+      // bump's PR, and lint (scripts/check-upstream-match.sh) backs that up.
       matchDatasources: ['docker'],
       matchDepNames: ['node'],
       matchUpdateTypes: ['major'],

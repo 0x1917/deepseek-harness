@@ -11,6 +11,9 @@ name: lint
 on:
   push:
   pull_request:
+  # upstream-sync.yml dispatches it on a branch it pushed to (a GITHUB_TOKEN push
+  # starts no workflows).
+  workflow_dispatch:
 
 permissions:
   contents: read
