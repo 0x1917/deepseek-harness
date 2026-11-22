@@ -27,14 +27,27 @@
       versioningTemplate: 'semver',
     },
     {
+      // pnpm follows upstream exactly: the version is whatever the
+      // packageManager field names at the dsh-v<DSH_VERSION> tag, so the match
+      // captures DSH_VERSION as the lookup's packageName. A dsh bump therefore
+      // brings its pnpm bump on the next run, once the new tag is in the file.
       customType: 'regex',
-      description: 'pnpm, which dsh runs for plugin lookups and installs',
+      description: 'pnpm, pinned to the one upstream builds the shipped release with',
       managerFilePatterns: ['/(^|/)Dockerfile$/'],
-      matchStrings: ['ARG PNPM_VERSION=(?<currentValue>\\S+)'],
+      matchStrings: ['ARG DSH_VERSION=(?<packageName>\\S+)[\\s\\S]*?ARG PNPM_VERSION=(?<currentValue>\\S+)'],
       depNameTemplate: 'pnpm',
-      datasourceTemplate: 'npm',
+      datasourceTemplate: 'custom.upstream-pnpm',
+      versioningTemplate: 'semver',
     },
   ],
+  customDatasources: {
+    'upstream-pnpm': {
+      defaultRegistryUrlTemplate: 'https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/dsh-v{{packageName}}/package.json',
+      format: 'json',
+      // packageManager reads `pnpm@<version>`, optionally with a `+sha...` hash.
+      transformTemplates: ['{"releases": [{"version": $split($substringAfter(packageManager, "pnpm@"), "+")[0]}]}'],
+    },
+  },
   packageRules: [
     {
       matchDepNames: ['deepseek-ai/deepseek-harness'],
@@ -48,10 +61,9 @@
       labels: ['dependencies', 'upstream'],
     },
     {
-      // Stay on the pnpm major upstream builds with (its package.json
-      // packageManager); raise this when upstream moves.
       matchDepNames: ['pnpm'],
-      allowedVersions: '<12',
+      commitMessageTopic: 'pnpm',
+      labels: ['dependencies', 'upstream'],
     },
     {
       // Pin the node base image by digest so base image fixes (Debian security

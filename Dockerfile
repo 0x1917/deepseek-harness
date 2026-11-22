@@ -6,12 +6,16 @@ ARG DSH_VERSION=0.2.2-rc.5
 
 # pnpm, which dsh runs to look up and install plugins (`dsh plugin`, the Web UI's plugin
 # installer). The image ships no corepack, so without it every plugin lookup fails with
-# `spawn pnpm ENOENT`. Kept on the major upstream builds with; Renovate bumps it.
-ARG PNPM_VERSION=11.28.12
+# `spawn pnpm ENOENT`. Pinned to exactly the pnpm upstream builds this release with (the
+# packageManager of its package.json at the dsh-v${DSH_VERSION} tag); Renovate follows it.
+# Keep this ARG after DSH_VERSION: the Renovate lookup reads both in one match.
+ARG PNPM_VERSION=11.28.5
 
 # The container's own needs: bubblewrap is the command sandbox on kernels without Landlock
 # (Unraid; it needs --security-opt seccomp=unconfined and systempaths=unconfined), gosu
-# and tini run the entrypoint, xdg-user-dirs locates dsh's default workspace.
+# and tini run the entrypoint, xdg-user-dirs locates dsh's default workspace. The fonts
+# are the families dsh's Office tools (libreoffice-kit) fall back to; its Linux WASM engine
+# uses only installed fonts, so without any every Office conversion and preview fails.
 #
 # The rest is for the agent, which runs unprivileged and cannot apt install: ssh (also
 # dsh's SSH workspaces), build tools and python3 (npm and pip packages that compile native
@@ -23,6 +27,10 @@ RUN apt-get update                              \
       build-essential                           \
       ca-certificates                           \
       curl                                      \
+      fonts-crosextra-caladea                   \
+      fonts-crosextra-carlito                   \
+      fonts-dejavu-core                         \
+      fonts-liberation                          \
       git                                       \
       gosu                                      \
       jq                                        \
