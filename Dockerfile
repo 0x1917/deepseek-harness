@@ -4,6 +4,11 @@ FROM node:26-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d18
 # dsh-v* git tags (renovate.json5).
 ARG DSH_VERSION=0.2.2-rc.5
 
+# pnpm, which dsh runs to look up and install plugins (`dsh plugin`, the Web UI's plugin
+# installer). The image ships no corepack, so without it every plugin lookup fails with
+# `spawn pnpm ENOENT`. Kept on the major upstream builds with; Renovate bumps it.
+ARG PNPM_VERSION=11.28.12
+
 # The container's own needs: bubblewrap is the command sandbox on kernels without Landlock
 # (Unraid; it needs --security-opt seccomp=unconfined and systempaths=unconfined), gosu
 # and tini run the entrypoint, xdg-user-dirs locates dsh's default workspace.
@@ -36,7 +41,7 @@ RUN apt-get update                              \
 # into /home/node without root.
 COPY --from=ghcr.io/astral-sh/uv:0.13.9 /uv /uvx /usr/local/bin/
 
-RUN npm install -g "@deepseek-ai/dsh@${DSH_VERSION}" \
+RUN npm install -g "@deepseek-ai/dsh@${DSH_VERSION}" "pnpm@${PNPM_VERSION}" \
  && npm cache clean --force
 
 # Runtime files are staged with COPY, installed at their target paths in one place, and the

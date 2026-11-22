@@ -35,6 +35,7 @@ Nothing is compiled here. The Dockerfile starts from `node:26-slim` (pinned by d
 - **`gosu`** and `runtime/entrypoint.sh`, which start as root only long enough to remap the
   `node` user to `PUID`/`PGID` and fix ownership, then run dsh unprivileged.
 - **`bubblewrap`**, dsh's command sandbox on kernels without Landlock.
+- **`pnpm`**, which dsh runs to look up and install plugins.
 - **Tools for the agent**, which runs unprivileged and cannot `apt install`: `git`, `ssh`,
   `curl`, `ripgrep`, `jq`, `unzip`, `xz`, `procps`, `python3`, a C toolchain (`build-essential`,
   for npm and pip packages that compile native code), and `uv`/`uvx` for Python tools.

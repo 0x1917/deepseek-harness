@@ -85,7 +85,7 @@ pass "user-level installs (npm -g, pip --user) land in /home/node/.local, on PAT
 
 # The agent's toolset, as the app user: present, and the compiler and uv actually work
 # (a missing linker or an unwritable uv cache would pass a plain `command -v`).
-missing=$(docker exec -u node "$NAME" sh -c 'for t in ssh git curl rg jq unzip xz ps make gcc python3 uv uvx; do
+missing=$(docker exec -u node "$NAME" sh -c 'for t in ssh git curl rg jq unzip xz ps make gcc python3 uv uvx pnpm; do
   command -v "$t" >/dev/null || printf "%s " "$t"; done')
 [ -z "$missing" ] || die "agent tools missing: $missing"
 docker exec -u node "$NAME" sh -c 'printf "int main(void){return 0;}\n" | gcc -x c - -o /tmp/smoke-cc && /tmp/smoke-cc' \
