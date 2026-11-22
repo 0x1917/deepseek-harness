@@ -7,7 +7,7 @@ ARG DSH_VERSION=0.2.2-rc.5
 # pnpm, which dsh runs to look up and install plugins (`dsh plugin`, the Web UI's plugin
 # installer). The image ships no corepack, so without it every plugin lookup fails with
 # `spawn pnpm ENOENT`. Kept on the major upstream builds with; Renovate bumps it.
-ARG PNPM_VERSION=11.28.12
+ARG PNPM_VERSION=11.29.0
 
 # The container's own needs: bubblewrap is the command sandbox on kernels without Landlock
 # (Unraid; it needs --security-opt seccomp=unconfined and systempaths=unconfined), gosu
