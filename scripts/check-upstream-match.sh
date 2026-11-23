@@ -6,11 +6,10 @@
 #
 #   scripts/check-upstream-match.sh [--fix] [repo-dir]    (default: this repository)
 #
-# Without --fix it fails on a mismatch (lint). With --fix it rewrites the Dockerfile to
-# match instead: PNPM_VERSION, and the FROM line to node:<major>-trixie-slim pinned to that
-# tag's current digest (needs docker buildx). upstream-sync.yml runs it on Renovate's PRs,
-# so a dsh bump arrives with its Node and pnpm in the same PR; Renovate itself cannot move
-# the base image's major from upstream's file without dropping the digest pin.
+# Without --fix it fails on a mismatch: lint runs it, so a Renovate dsh bump whose release
+# moved either one goes red. With --fix it rewrites the Dockerfile to match instead:
+# PNPM_VERSION, and the FROM line to node:<major>-trixie-slim pinned to that tag's current
+# digest (needs docker buildx). Run it on the PR's branch and push the result.
 set -euo pipefail
 
 fix=false
@@ -50,4 +49,5 @@ elif $fix; then
 else
   echo "Node.js $node, but upstream dsh-v$dsh tests on $up_node: switch FROM to $base (pinned by digest)" >&2; rc=1
 fi
+[ "$rc" = 0 ] || echo "to fix: run scripts/check-upstream-match.sh --fix on this branch and push" >&2
 exit "$rc"

@@ -26,28 +26,10 @@
       extractVersionTemplate: '^dsh-v(?<version>.+)$',
       versioningTemplate: 'semver',
     },
-    {
-      // pnpm follows upstream exactly: the version is whatever the
-      // packageManager field names at the dsh-v<DSH_VERSION> tag, so the match
-      // captures DSH_VERSION as the lookup's packageName. A dsh bump's own PR
-      // already carries the matching pnpm: upstream-sync.yml commits it.
-      customType: 'regex',
-      description: 'pnpm, pinned to the one upstream builds the shipped release with',
-      managerFilePatterns: ['/(^|/)Dockerfile$/'],
-      matchStrings: ['ARG DSH_VERSION=(?<packageName>\\S+)[\\s\\S]*?ARG PNPM_VERSION=(?<currentValue>\\S+)'],
-      depNameTemplate: 'pnpm',
-      datasourceTemplate: 'custom.upstream-pnpm',
-      versioningTemplate: 'semver',
-    },
+    // pnpm and the node major are not Renovate's: they follow upstream's
+    // release, and lint (scripts/check-upstream-match.sh) fails the dsh bump's
+    // PR until they match; `--fix` rewrites them.
   ],
-  customDatasources: {
-    'upstream-pnpm': {
-      defaultRegistryUrlTemplate: 'https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/dsh-v{{packageName}}/package.json',
-      format: 'json',
-      // packageManager reads `pnpm@<version>`, optionally with a `+sha...` hash.
-      transformTemplates: ['{"releases": [{"version": $split($substringAfter(packageManager, "pnpm@"), "+")[0]}]}'],
-    },
-  },
   packageRules: [
     {
       matchDepNames: ['deepseek-ai/deepseek-harness'],
@@ -61,11 +43,6 @@
       labels: ['dependencies', 'upstream'],
     },
     {
-      matchDepNames: ['pnpm'],
-      commitMessageTopic: 'pnpm',
-      labels: ['dependencies', 'upstream'],
-    },
-    {
       // Pin the node base image by digest so base image fixes (Debian security
       // updates, Node patch releases) arrive as PRs. Merging one republishes the
       // same dsh version as a -r<n> rebuild. Batched weekly to limit churn.
@@ -73,10 +50,8 @@
       pinDigests: true,
     },
     {
-      // The node major follows upstream's CI, not Docker Hub: Renovate cannot
-      // switch it from upstream's file without dropping the digest pin, so it
-      // proposes none. upstream-sync.yml moves it, re-pinned, on the dsh
-      // bump's PR, and lint (scripts/check-upstream-match.sh) backs that up.
+      // The node major follows upstream's CI, not Docker Hub, so Renovate
+      // proposes none; digest and patch updates within it still come.
       matchDatasources: ['docker'],
       matchDepNames: ['node'],
       matchUpdateTypes: ['major'],
