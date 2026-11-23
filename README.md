@@ -33,7 +33,7 @@ Nothing is compiled here. The Dockerfile starts from `node:24-trixie-slim` (pinn
 
 - **`tini`** as PID 1, so stop signals reach dsh and orphaned agent processes are reaped.
 - **`gosu`** and `runtime/entrypoint.sh`, which start as root only long enough to remap the
-  `node` user to `PUID`/`PGID` and fix ownership, then run dsh unprivileged.
+  `dsh` user to `PUID`/`PGID` and fix ownership, then run dsh unprivileged.
 - **`bubblewrap`**, dsh's command sandbox on kernels without Landlock.
 - **`pnpm`**, which dsh runs to look up and install plugins, pinned to the version upstream builds
   the release with.
@@ -43,7 +43,7 @@ Nothing is compiled here. The Dockerfile starts from `node:24-trixie-slim` (pinn
   `curl`, `ripgrep`, `jq`, `unzip`, `xz`, `procps`, `python3`, a C toolchain (`build-essential`,
   for npm and pip packages that compile native code), and `uv`/`uvx` for Python tools.
   Anything else the agent installs (`npm -g`, `pip --user`, `uv tool`, downloaded binaries)
-  lands in the persistent `/home/node`.
+  lands in the persistent `/home/dsh`.
 - **`runtime/healthcheck.sh`**, because dsh has no health endpoint.
 
 ### Build
@@ -82,7 +82,7 @@ docker run -d                                       \
   -e DSH_TRUSTED_HOSTS=192.168.1.10                 \
   -e DSH_PUBLIC_URL=http://192.168.1.10:3080/       \
   -v /mnt/user/appdata/dsh/data:/data               \
-  -v /mnt/user/appdata/dsh/home:/home/node          \
+  -v /mnt/user/appdata/dsh/home:/home/dsh           \
   -v /mnt/user/appdata/dsh/workspace:/workspace     \
   0x1917/deepseek-harness:latest
 
@@ -94,12 +94,17 @@ docker logs dsh   # prints the login link
 | Path         | Holds                                                                                                  |
 | ------------ | ------------------------------------------------------------------------------------------------------ |
 | `/data`      | dsh's home (`DSH_HOME`): settings, sessions, plugins, the saved API key, and the cookie signing key    |
-| `/home/node` | The app user's home: tools the agent installs (`npm -g`, `pip --user`, `uv tool`), SSH keys and config |
+| `/home/dsh`  | The app user's home: tools the agent installs (`npm -g`, `pip --user`, `uv tool`), SSH keys and config |
 | `/workspace` | What the agent reads and edits. dsh's default workspace is created under it                            |
 
-All three survive restarts and image updates. `/data` and `/home/node` are re-owned to
+All three survive restarts and image updates. `/data` and `/home/dsh` are re-owned to
 `PUID`/`PGID` at every start; `/workspace` only when it is empty, so a mounted share is never
 chowned.
+
+The app user is `dsh`. Images up to `0.2.2-rc.5-r5` ran as the base image's `node` user with
+its home at `/home/node`; on an existing install, point the home mapping at `/home/dsh` (the
+host folder stays the same). `/home/node` remains a symlink to `/home/dsh`, so absolute paths
+recorded under the old name (uv tool launchers, SSH config) keep working.
 
 ## First boot
 
@@ -129,8 +134,8 @@ Read from the container environment at start; changing a value means recreating 
 | `DEEPSEEK_API_KEY`  | unset                    | Optional; the UI can store the key in `/data` instead.                                                     |
 
 Baked into the image and not meant to be changed: `DSH_HOME=/data`, `DSH_PORT=3080` (move the UI
-with the host side of `-p` instead), `NPM_CONFIG_PREFIX=/home/node/.local`, and
-`/home/node/.local/bin` at the front of `PATH`.
+with the host side of `-p` instead), `NPM_CONFIG_PREFIX=/home/dsh/.local`, and
+`/home/dsh/.local/bin` at the front of `PATH`.
 
 ### Address and access
 
@@ -175,9 +180,10 @@ bash scripts/smoke-test.sh deepseek-harness:test
 | container becomes healthy                              | dsh started and the healthcheck reaches its listener   |
 | `dsh --version` matches the image version label        | the npm install is the release the ARG names           |
 | dsh runs as `99:100`                                   | the `PUID`/`PGID` remap and the `gosu` drop            |
+| the app user is `dsh` (UID 99), home `/home/dsh`       | the rename of the base image's `node` user             |
 | `/data` and the empty `/workspace` owned by `99:100`   | the Unraid appdata ownership contract                  |
-| XDG Documents is `/workspace` on a fresh `/home/node`  | dsh can create its default workspace on a new install  |
-| npm's global prefix is `/home/node/.local`, on `PATH`  | tools the agent installs land on the persistent volume |
+| XDG Documents is `/workspace` on a fresh `/home/dsh`   | dsh can create its default workspace on a new install  |
+| npm's global prefix is `/home/dsh/.local`, on `PATH`   | tools the agent installs land on the persistent volume |
 | bubblewrap creates a sandbox                           | agent commands can run on a kernel without Landlock    |
 | 401, then 303 with the token, then 200 with the cookie | the launch-token sign-in                               |
 | the client bundle loads                                | the web UI is served, not just the document            |
@@ -298,12 +304,12 @@ Renovate does steps 1 to 3 and opens a PR; merging it is step 4. By hand:
 - **dsh is exec'd behind `tini`.** It is PID 1's direct child, gets `docker stop`'s signal
   itself, and its exit status is the container's. `tini` also reaps the orphans agent commands
   leave behind.
-- **Root only at start.** The entrypoint remaps `node` to `PUID`/`PGID`, re-owns only what is
-  wrong (so a large `/data` restarts fast), then re-runs itself as `node` through `gosu`.
+- **Root only at start.** The entrypoint remaps `dsh` to `PUID`/`PGID`, re-owns only what is
+  wrong (so a large `/data` restarts fast), then re-runs itself as `dsh` through `gosu`.
   Nothing the agent runs has root.
 - **The container IP, not `0.0.0.0`.** dsh refuses wildcard binds, and loopback is unreachable
   through Docker's port publishing, so the entrypoint binds the container's address.
-- **A persistent home.** `/home/node` is a volume so the agent's installs survive. npm's global
+- **A persistent home.** `/home/dsh` is a volume so the agent's installs survive. npm's global
   prefix moves to `~/.local` because its default, `/usr/local`, is not writable by the app user.
   The entrypoint recreates the XDG file and the bin directory on a fresh, empty volume.
 - **Layout.** `runtime/` holds what ships in the image; `scripts/` holds what only CI and

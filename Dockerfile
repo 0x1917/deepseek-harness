@@ -24,7 +24,7 @@ ARG PNPM_VERSION=11.28.5
 # The rest is for the agent, which runs unprivileged and cannot apt install: ssh (also
 # dsh's SSH workspaces), build tools and python3 (npm and pip packages that compile native
 # code; node-gyp needs both), and the everyday shell tools. User-level installs (uv, pip,
-# npm -g) land in the persistent /home/node instead.
+# npm -g) land in the persistent /home/dsh instead.
 RUN apt-get update                              \
  && apt-get install -y --no-install-recommends  \
       bubblewrap                                \
@@ -51,7 +51,7 @@ RUN apt-get update                              \
 
 # uv and uvx, from Astral's published image (Renovate bumps the tag and pins its digest).
 # Python tools then run as `uvx <tool>`, and `uv python install` adds other Pythons, all
-# into /home/node without root.
+# into /home/dsh without root.
 COPY --from=ghcr.io/astral-sh/uv:0.13.9 /uv /uvx /usr/local/bin/
 
 RUN npm install -g "@deepseek-ai/dsh@${DSH_VERSION}" "pnpm@${PNPM_VERSION}" \
@@ -64,21 +64,29 @@ RUN install -D -m 755 /tmp/dsh-runtime/entrypoint.sh   /usr/local/bin/dsh-entryp
  && install -D -m 755 /tmp/dsh-runtime/healthcheck.sh  /usr/local/bin/dsh-healthcheck  \
  && rm -rf /tmp/dsh-runtime
 
-# /home/node is a volume so tools the agent installs survive restarts. npm's global prefix
+# The app user is dsh, not the base image's node: the base's node user and group are renamed
+# (same UID/GID, which the entrypoint remaps to PUID/PGID anyway) and its home moved to
+# /home/dsh. /home/node stays as a symlink to it, so absolute paths an older volume recorded
+# (uv tool and venv launchers, SSH config) still resolve.
+RUN groupmod -n dsh node                    \
+ && usermod -l dsh -d /home/dsh -m node     \
+ && ln -s /home/dsh /home/node
+
+# /home/dsh is a volume so tools the agent installs survive restarts. npm's global prefix
 # defaults to /usr/local, which the unprivileged user cannot write, so global installs go to
 # ~/.local instead, next to pip --user and uv tool; its bin dir comes first on PATH.
 ENV DSH_HOME=/data                          \
     DSH_PORT=3080                           \
     PUID=99                                 \
     PGID=100                                \
-    NPM_CONFIG_PREFIX=/home/node/.local     \
-    PATH=/home/node/.local/bin:$PATH
+    NPM_CONFIG_PREFIX=/home/dsh/.local      \
+    PATH=/home/dsh/.local/bin:$PATH
 
-RUN mkdir -p /data /workspace /home/node/.local/bin
+RUN mkdir -p /data /workspace /home/dsh/.local/bin
 
-# Starts as root; dsh-entrypoint remaps node to PUID/PGID and drops to it via gosu.
+# Starts as root; dsh-entrypoint remaps dsh to PUID/PGID and drops to it via gosu.
 WORKDIR /workspace
-VOLUME ["/data", "/workspace", "/home/node"]
+VOLUME ["/data", "/workspace", "/home/dsh"]
 EXPOSE 3080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \

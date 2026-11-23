@@ -51,7 +51,7 @@ trade-off:
   seccomp=unconfined` and `--security-opt systempaths=unconfined` are what bubblewrap needs
   on a kernel without Landlock; without them dsh refuses to run commands. They weaken the
   container's own isolation, so the agent's sandbox carries more of the weight.
-- **The container starts as root** only to remap the `node` user to `PUID`/`PGID` and fix
+- **The container starts as root** only to remap the `dsh` user to `PUID`/`PGID` and fix
   ownership of `/data`; it then drops to that user with `gosu`. dsh and everything the agent
   runs are unprivileged.
 - **Authentication is dsh's launch token**, printed in the container log at every start and

@@ -4,18 +4,18 @@ set -eu
 
 umask "${UMASK:-022}"
 
-# As root: take on the host's UID/GID (Unraid: 99:100), fix ownership, re-run this script as node.
+# As root: take on the host's UID/GID (Unraid: 99:100), fix ownership, re-run this script as dsh.
 if [ "$(id -u)" = 0 ]; then
-  groupmod -o -g "$PGID" node
-  usermod -o -u "$PUID" -g "$PGID" node
-  # /home/node is a volume, so a fresh one is empty: recreate the bin dir on PATH, and the
+  groupmod -o -g "$PGID" dsh
+  usermod -o -u "$PUID" -g "$PGID" dsh
+  # /home/dsh is a volume, so a fresh one is empty: recreate the bin dir on PATH, and the
   # XDG Documents dir, which must point at /workspace (dsh's default workspace lives there).
-  mkdir -p /home/node/.config /home/node/.local/bin
-  echo 'XDG_DOCUMENTS_DIR="/workspace"' > /home/node/.config/user-dirs.dirs
-  find /data /home/node \( ! -user node -o ! -group node \) -exec chown -h node:node {} +
+  mkdir -p /home/dsh/.config /home/dsh/.local/bin
+  echo 'XDG_DOCUMENTS_DIR="/workspace"' > /home/dsh/.config/user-dirs.dirs
+  find /data /home/dsh \( ! -user dsh -o ! -group dsh \) -exec chown -h dsh:dsh {} +
   # Only claim /workspace when empty: a mounted share should already be owned by PUID/PGID.
-  if [ -z "$(ls -A /workspace)" ]; then chown node:node /workspace; fi
-  exec gosu node "$0" "$@"
+  if [ -z "$(ls -A /workspace)" ]; then chown dsh:dsh /workspace; fi
+  exec gosu dsh "$0" "$@"
 fi
 
 host="${DSH_BIND:-$(hostname -i | awk '{print $1}')}"

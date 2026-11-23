@@ -38,7 +38,7 @@ mkdir -p "$DATA/data" "$DATA/workspace" "$DATA/home"
 docker run -d --name "$NAME" -p 127.0.0.1::3080                          \
   --security-opt seccomp=unconfined --security-opt systempaths=unconfined \
   -e DSH_TRUSTED_HOSTS="$TRUSTED" "${EXTRA[@]}"                           \
-  -v "$DATA/data:/data" -v "$DATA/workspace:/workspace" -v "$DATA/home:/home/node" "$IMAGE" >/dev/null
+  -v "$DATA/data:/data" -v "$DATA/workspace:/workspace" -v "$DATA/home:/home/dsh" "$IMAGE" >/dev/null
 PORT=$(docker port "$NAME" 3080/tcp | head -1 | sed 's/.*://')
 U="http://127.0.0.1:$PORT"
 
@@ -51,7 +51,7 @@ done
 pass "container is healthy"
 
 want=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$IMAGE")
-got=$(docker exec -u node "$NAME" dsh --version | tail -1)
+got=$(docker exec -u dsh "$NAME" dsh --version | tail -1)
 [ -n "$want" ] && [ "$got" = "$want" ] || die "dsh --version is '$got', image label says '$want'"
 pass "dsh $got matches the image version label"
 
@@ -65,32 +65,38 @@ done' | sort -u)
 [ "$ids" = "99:100" ] || die "dsh runs as '$ids', expected 99:100"
 pass "dsh runs as 99:100"
 
+who=$(docker exec -u 99 "$NAME" id -un)
+[ "$who" = dsh ] || die "UID 99 is '$who', expected the dsh user"
+home=$(docker exec -u dsh "$NAME" sh -c 'echo ~')
+[ "$home" = /home/dsh ] || die "the dsh user's home is '$home', expected /home/dsh"
+pass "the app user is dsh (UID 99), home /home/dsh"
+
 owner=$(docker exec "$NAME" stat -c '%u:%g' /data /workspace | sort -u)
 [ "$owner" = "99:100" ] || die "/data and /workspace are owned by '$owner'"
 pass "/data and the empty /workspace are owned by 99:100"
 
-docs=$(docker exec -u node "$NAME" xdg-user-dir DOCUMENTS)
+docs=$(docker exec -u dsh "$NAME" xdg-user-dir DOCUMENTS)
 [ "$docs" = /workspace ] || die "XDG Documents is '$docs', the default workspace cannot be created"
-pass "XDG Documents points at /workspace, on a fresh /home/node volume"
+pass "XDG Documents points at /workspace, on a fresh /home/dsh volume"
 
-prefix=$(docker exec -u node "$NAME" npm config get prefix)
-[ "$prefix" = /home/node/.local ] || die "npm's global prefix is '$prefix', not the persistent /home/node/.local"
-docker exec -u node "$NAME" sh -c 'touch /home/node/.local/bin/.w && rm /home/node/.local/bin/.w' \
-  || die "/home/node/.local/bin is not writable by the app user"
-case ":$(docker exec -u node "$NAME" printenv PATH):" in
-  *:/home/node/.local/bin:*) ;;
-  *) die "/home/node/.local/bin is not on PATH" ;;
+prefix=$(docker exec -u dsh "$NAME" npm config get prefix)
+[ "$prefix" = /home/dsh/.local ] || die "npm's global prefix is '$prefix', not the persistent /home/dsh/.local"
+docker exec -u dsh "$NAME" sh -c 'touch /home/dsh/.local/bin/.w && rm /home/dsh/.local/bin/.w' \
+  || die "/home/dsh/.local/bin is not writable by the app user"
+case ":$(docker exec -u dsh "$NAME" printenv PATH):" in
+  *:/home/dsh/.local/bin:*) ;;
+  *) die "/home/dsh/.local/bin is not on PATH" ;;
 esac
-pass "user-level installs (npm -g, pip --user) land in /home/node/.local, on PATH"
+pass "user-level installs (npm -g, pip --user) land in /home/dsh/.local, on PATH"
 
 # The agent's toolset, as the app user: present, and the compiler and uv actually work
 # (a missing linker or an unwritable uv cache would pass a plain `command -v`).
-missing=$(docker exec -u node "$NAME" sh -c 'for t in ssh git curl rg jq unzip xz ps make gcc python3 uv uvx pnpm; do
+missing=$(docker exec -u dsh "$NAME" sh -c 'for t in ssh git curl rg jq unzip xz ps make gcc python3 uv uvx pnpm; do
   command -v "$t" >/dev/null || printf "%s " "$t"; done')
 [ -z "$missing" ] || die "agent tools missing: $missing"
-docker exec -u node "$NAME" sh -c 'printf "int main(void){return 0;}\n" | gcc -x c - -o /tmp/smoke-cc && /tmp/smoke-cc' \
+docker exec -u dsh "$NAME" sh -c 'printf "int main(void){return 0;}\n" | gcc -x c - -o /tmp/smoke-cc && /tmp/smoke-cc' \
   || die "gcc cannot compile and link a program"
-docker exec -u node -w /tmp "$NAME" sh -c 'uv venv -q --offline /tmp/smoke-venv && /tmp/smoke-venv/bin/python -c "import sys"' \
+docker exec -u dsh -w /tmp "$NAME" sh -c 'uv venv -q --offline /tmp/smoke-venv && /tmp/smoke-venv/bin/python -c "import sys"' \
   || die "uv cannot create a virtual environment as the app user"
 pass "agent tools present as the app user; gcc links, uv creates a venv"
 
@@ -98,7 +104,7 @@ pass "agent tools present as the app user; gcc links, uv creates a venv"
 # only installed fonts and rejects every document when there are none. Render a minimal
 # .docx to PDF the way dsh does, from dsh's own install; its text is partly Chinese, which
 # must come out in a CJK font (without one it falls back to Liberation, with no glyphs).
-docker exec -i -u node -w /tmp "$NAME" sh -s <<'SMOKE' || die "Office conversion fails (fonts, CJK fonts or the LibreOffice engine missing)"
+docker exec -i -u dsh -w /tmp "$NAME" sh -s <<'SMOKE' || die "Office conversion fails (fonts, CJK fonts or the LibreOffice engine missing)"
 set -eu
 python3 - <<'PY'
 import zipfile
@@ -118,7 +124,7 @@ LC_ALL=C grep -aq 'BaseFont */[A-Z]*+Noto[A-Za-z]*CJK' /tmp/smoke.pdf || { echo 
 SMOKE
 pass "Office tools convert a document to PDF, Chinese text in a CJK font"
 
-docker exec -u node "$NAME" bwrap --ro-bind / / --dev /dev --proc /proc --unshare-pid --unshare-user true \
+docker exec -u dsh "$NAME" bwrap --ro-bind / / --dev /dev --proc /proc --unshare-pid --unshare-user true \
   || die "bubblewrap cannot create a sandbox"
 pass "bubblewrap sandbox works"
 

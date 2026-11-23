@@ -46,7 +46,7 @@ restrictions lifted, as CI does (see the comment at the top of the script).
 A failing check here is usually telling you something deliberate. Each exists because the
 alternative was a bug:
 
-- **No `USER` instruction.** The entrypoint must start as root to remap `node` to
+- **No `USER` instruction.** The entrypoint must start as root to remap `dsh` to
   `PUID`/`PGID` and fix `/data`, then drops privileges with `gosu`.
 - **dsh listens on the container IP, never `0.0.0.0`.** dsh refuses wildcard binds.
 - **`/workspace` is only re-owned when it is empty.** A mounted share must never be chowned.
