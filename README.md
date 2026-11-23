@@ -101,11 +101,6 @@ All three survive restarts and image updates. `/data` and `/home/dsh` are re-own
 `PUID`/`PGID` at every start; `/workspace` only when it is empty, so a mounted share is never
 chowned.
 
-The app user is `dsh`. Images up to `0.2.2-rc.5-r5` ran as the base image's `node` user with
-its home at `/home/node`; on an existing install, point the home mapping at `/home/dsh` (the
-host folder stays the same). `/home/node` remains a symlink to `/home/dsh`, so absolute paths
-recorded under the old name (uv tool launchers, SSH config) keep working.
-
 ## First boot
 
 1. **Sign in.** There is no password. Every start prints a login link with a launch token in

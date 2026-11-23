@@ -52,7 +52,7 @@ RUN apt-get update                              \
 # uv and uvx, from Astral's published image (Renovate bumps the tag and pins its digest).
 # Python tools then run as `uvx <tool>`, and `uv python install` adds other Pythons, all
 # into /home/dsh without root.
-COPY --from=ghcr.io/astral-sh/uv:0.13.9 /uv /uvx /usr/local/bin/
+COPY --from=ghcr.io/astral-sh/uv:0.13.9@sha256:d3b601f0c7b118bc1753febf7c41cc80981df678445e0254284eecf84db79a7d /uv /uvx /usr/local/bin/
 
 RUN npm install -g "@deepseek-ai/dsh@${DSH_VERSION}" "pnpm@${PNPM_VERSION}" \
  && npm cache clean --force
@@ -66,11 +66,9 @@ RUN install -D -m 755 /tmp/dsh-runtime/entrypoint.sh   /usr/local/bin/dsh-entryp
 
 # The app user is dsh, not the base image's node: the base's node user and group are renamed
 # (same UID/GID, which the entrypoint remaps to PUID/PGID anyway) and its home moved to
-# /home/dsh. /home/node stays as a symlink to it, so absolute paths an older volume recorded
-# (uv tool and venv launchers, SSH config) still resolve.
+# /home/dsh.
 RUN groupmod -n dsh node                    \
- && usermod -l dsh -d /home/dsh -m node     \
- && ln -s /home/dsh /home/node
+ && usermod -l dsh -d /home/dsh -m node
 
 # /home/dsh is a volume so tools the agent installs survive restarts. npm's global prefix
 # defaults to /usr/local, which the unprivileged user cannot write, so global installs go to
